@@ -1,0 +1,19 @@
+project_id = "sclllaeohntpmyazbkmn"
+
+[functions.ai-decision]
+verify_jwt = false
+
+[functions.ai-chat]
+verify_jwt = false
+
+[functions.agent-chat]
+verify_jwt = false
+
+[functions.trading-agent]
+verify_jwt = false
+
+[functions.sodex-executor]
+verify_jwt = false
+
+[functions.sosovalue]
+verify_jwt = false
