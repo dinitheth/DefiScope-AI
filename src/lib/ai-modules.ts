@@ -153,21 +153,73 @@ export async function getOpportunities(): Promise<OpportunitiesData> {
   const news = await fetchNews();
   const sentiment = summarizeSentiment(news);
 
-  const { data, error } = await supabase.functions.invoke("ai-decision", {
-    body: {
-      mode: "opportunities",
-      topCoins: coins.slice(0, 10).map((c) => ({
-        symbol: c.coinSymbol,
-        price: c.coinPrice,
-        change24h: c.priceChangePercent24h,
-        volume24h: c.volume24h,
-      })),
-      newsSentiment: sentiment,
-    },
-  });
-  if (error) throw error;
-  const sorted = [...((data as OpportunitiesData).opportunities || [])].sort((a, b) => b.rankScore - a.rankScore);
-  return { opportunities: sorted };
+  const topCoins = coins
+    .filter((c) => c.coinSymbol && c.coinPrice > 0)
+    .slice(0, 10)
+    .map((c) => ({
+      symbol: c.coinSymbol,
+      price: c.coinPrice,
+      change24h: c.priceChangePercent24h,
+      volume24h: c.volume24h,
+    }));
+
+  try {
+    const { data, error } = await supabase.functions.invoke("ai-decision", {
+      body: {
+        mode: "opportunities",
+        topCoins,
+        newsSentiment: sentiment,
+      },
+    });
+    if (error) throw error;
+    const sorted = [...((data as OpportunitiesData).opportunities || [])]
+      .filter((op) => op?.symbol)
+      .sort((a, b) => b.rankScore - a.rankScore);
+    if (sorted.length > 0) return { opportunities: sorted };
+  } catch (error) {
+    console.warn("[getOpportunities] AI opportunity ranking unavailable, using deterministic market fallback:", error);
+  }
+
+  return { opportunities: buildFallbackOpportunities(topCoins, sentiment) };
+}
+
+function buildFallbackOpportunities(
+  topCoins: Array<{ symbol: string; price: number; change24h: number; volume24h: number }>,
+  sentiment: { positive: number; negative: number; neutral: number },
+): Opportunity[] {
+  const sentimentBias = sentiment.positive - sentiment.negative;
+  return topCoins
+    .slice()
+    .sort((a, b) => Math.abs(b.change24h) - Math.abs(a.change24h))
+    .slice(0, 5)
+    .map((coin) => {
+      const action: Opportunity["action"] = coin.change24h > 1.5
+        ? "BUY"
+        : coin.change24h < -3
+          ? "WATCH"
+          : "WATCH";
+      const type: Opportunity["type"] = Math.abs(coin.change24h) >= 4
+        ? "momentum"
+        : coin.volume24h > 1_000_000_000
+          ? "volume_spike"
+          : "sentiment_shift";
+      const rankScore = Math.min(9.2, Math.max(4.5, 5 + Math.abs(coin.change24h) * 0.45 + Math.max(0, sentimentBias) * 0.2));
+
+      return {
+        symbol: coin.symbol,
+        type,
+        action,
+        confidence: Math.round(Math.min(88, Math.max(52, rankScore * 9))),
+        rankScore: Math.round(rankScore * 10) / 10,
+        reasoning: `${coin.symbol} moved ${coin.change24h.toFixed(2)}% in 24h with about $${Math.round(coin.volume24h).toLocaleString()} volume, while news sentiment is ${sentiment.positive}/${sentiment.negative}/${sentiment.neutral} positive/negative/neutral.`,
+        drivers: [
+          `24h price ${coin.change24h >= 0 ? "+" : ""}${coin.change24h.toFixed(2)}%`,
+          `$${Math.round(coin.volume24h).toLocaleString()} 24h volume`,
+          `${sentiment.positive - sentiment.negative >= 0 ? "positive" : "negative"} news bias ${sentimentBias}`,
+        ],
+        timeframe: Math.abs(coin.change24h) > 5 ? "short" : "medium",
+      };
+    });
 }
 
 export async function getEtfFlows(etfType: "btc" | "eth" = "btc"): Promise<EtfFlowsData> {

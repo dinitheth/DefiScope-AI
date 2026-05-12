@@ -16,6 +16,8 @@ const scoreColor = (s: number) =>
   s >= 8 ? "text-[hsl(var(--success))]" : s >= 6 ? "text-primary" : s >= 4 ? "text-[hsl(var(--warning))]" : "text-muted-foreground";
 
 export default function OpportunityDiscoveryView({ data }: { data: OpportunitiesData }) {
+  const opportunities = data.opportunities || [];
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -37,7 +39,15 @@ export default function OpportunityDiscoveryView({ data }: { data: Opportunities
       </div>
 
       <div className="space-y-2">
-        {data.opportunities.map((op, i) => {
+        {opportunities.length === 0 && (
+          <div className="p-3 rounded-xl bg-secondary/40 border border-border/50">
+            <p className="text-xs text-muted-foreground">
+              No ranked opportunities were returned from the live data feed. Try again once the SoSoValue provider is healthy.
+            </p>
+          </div>
+        )}
+
+        {opportunities.map((op, i) => {
           const Icon = ACTION_ICON[op.action];
           return (
             <motion.div
