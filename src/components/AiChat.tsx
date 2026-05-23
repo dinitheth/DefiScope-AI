@@ -24,6 +24,7 @@ import NewsFeedView from "./ai-views/NewsFeedView";
 import LiveChartView from "./ai-views/LiveChartView";
 import AgentRecommendationView, { type AgentRecommendationData, type AgentSignal } from "./ai-views/AgentRecommendationView";
 import SodexTradeWidget, { type SodexTradeResult } from "./ai-views/SodexTradeWidget";
+import FlowPulseStrategyCard from "./ai-views/FlowPulseStrategyCard";
 import ToolCarousel from "./ai-views/ToolCarousel";
 
 import Typewriter from "./ai-views/Typewriter";
@@ -1517,6 +1518,33 @@ function MessageBubble({ message, onRetry, busy, walletAddress }: { message: Cha
         {allStepsSettled && carouselItems.length > 0 && (
           <ToolCarousel items={carouselItems} />
         )}
+
+        {/* 2a. FlowPulse Strategy Card — auto-appears when both narrative + decision data
+               are present in this message. Gives the user the Publish to Base Testnet button. */}
+        {allStepsSettled && (() => {
+          if (!message.steps) return null;
+          const narrative = message.steps.find(s => s.name === "get_market_narrative" && s.result);
+          const decision = message.steps.find(s => s.name === "get_ai_decision" && s.result);
+          if (!narrative?.result || !decision?.result) return null;
+          const n = narrative.result as NarrativeData;
+          const d = decision.result as DecisionData;
+          const allocation: Record<string, number> = {
+            BTC: d.action === "BUY" ? 40 : d.action === "SELL" ? 10 : 25,
+            ETH: d.action === "BUY" ? 30 : d.action === "SELL" ? 10 : 25,
+            SOL: 20,
+            USDC: d.action === "SELL" ? 60 : d.action === "HOLD" ? 30 : 10,
+          };
+          return (
+            <FlowPulseStrategyCard
+              regime={n.regime}
+              allocation={allocation}
+              memo={n.narrative}
+              reasoning={d.reasoning ?? []}
+              confidence={d.confidence}
+              ownerKey={walletAddress}
+            />
+          );
+        })()}
 
         {/* 2b. SoDEX trade result widget — shown when agent executed a quick_trade/close */}
         {!isUser && message.tradeResult && (

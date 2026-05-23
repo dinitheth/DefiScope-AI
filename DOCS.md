@@ -1,142 +1,237 @@
-# DefiScope Technical Documentation
+# DefiScope AI — Technical Documentation
 
-DefiScope is an AI-powered on-chain finance intelligence application for the SoSoValue Builderthon. It provides a conversational AI interface that fetches live market data, analyses it through multiple specialized engines, and delivers clear, data-driven answers in plain English.
+DefiScope is an AI-powered on-chain finance intelligence platform built for the SoSoValue Buildathon. It provides a conversational AI research assistant backed by live SoSoValue market data, with a Wave 2 on-chain strategy publishing layer on Base Testnet.
+
+---
 
 ## 1. System Overview
 
-```text
-SoSoValue API
-  -> market snapshots, ETF flows, news
-  -> AI analysis engines (decision, narrative, opportunities)
-  -> plain-English answers with data visualizations
+```
+User question
+      ↓
+ai-chat (Phase 1: Plan) → decides which tools to call
+      ↓
+Tools run in parallel:
+  sosovalue proxy → SoSoValue API (ETF, news) + Binance (prices)
+  ai-decision      → BUY/HOLD/SELL signal engine
+      ↓
+ai-chat (Phase 2: Synthesize) → analytical response citing real numbers
+      ↓
+Frontend: tool cards + FlowPulse Strategy Card + AI text
+      ↓
+Optional: hash + publish strategy to Base Sepolia via MetaMask
 ```
 
-The app has one primary surface:
+---
 
-- **AI Chat**: a research assistant that answers market questions using live data from SoSoValue. It can pull ETF flows, market narratives, trade decisions, news sentiment, opportunities, and live charts — all through natural language.
+## 2. SoSoValue API Integration (Live Endpoints)
 
-## 2. Data Sources
+All SoSoValue calls are proxied through the `sosovalue` Supabase Edge Function with:
+- Server-side `x-soso-api-key` authentication
+- 90-second in-memory cache (per endpoint + params)
+- Rate limiting at 18 req/min (headroom below the 20/min limit)
+- Graceful degradation: stale cache served on upstream errors
 
-The `sosovalue` edge function proxies and caches SoSoValue API calls:
+| Endpoint | Method | Path | Data Returned |
+|---|---|---|---|
+| ETF Metrics | POST | `/openapi/v2/etf/currentEtfDataMetrics` | Per-fund AUM, daily inflow, cumulative flow, price |
+| ETF Inflow History | POST | `/openapi/v2/etf/historicalInflowChart` | 30-day daily inflow series for chart rendering |
+| News Featured | GET | `/openapi/v1/news/featured` | Latest headlines, authors, timestamps, links |
+| Coin List | POST | `/openapi/v1/data/default/coin/list` | Coin directory (ID, name, symbol) — fallback only |
 
-| Logical endpoint | Purpose |
-|---|---|
-| `coinList` | Currency list enriched with market snapshots for top assets. |
-| `etfMetrics` | BTC/ETH spot ETF fund metrics and flow snapshots. |
-| `etfInflowHistory` | Historical ETF flow series for charts and weekly totals. |
-| `news` | Featured news used for market narrative and sentiment context. |
+### Price Enrichment
+The `coinList` handler bypasses SoSoValue (which returns no price data) and instead calls **Binance's free public ticker API**:
 
-The proxy keeps API keys server-side and rate-limits requests to protect the SoSoValue quota.
+```
+GET https://api.binance.com/api/v3/ticker/24hr?symbols=[...]
+```
 
-## 3. AI Chat — Two-Phase Tool-Calling Architecture
+Returns: `lastPrice`, `priceChangePercent`, `quoteVolume` for BTC, ETH, SOL, BNB, XRP, DOGE, ADA, AVAX, LINK, DOT.
 
-The AI chat uses a two-phase approach:
+No additional API key required. This provides real-time prices to the AI Decision Engine, eliminating the `$0.0000` placeholder issue.
+
+---
+
+## 3. AI Chat — Two-Phase Architecture
 
 ### Phase 1: Plan
-The AI examines the user's question and decides which data tools to call. Available tools:
+The `ai-chat` edge function receives the user's message and calls Gemini with tool definitions. Gemini selects which data tools to call (0–4 tools depending on the question).
 
-| Tool | Purpose |
-|---|---|
-| `get_market_narrative` | Generates a comprehensive market regime narrative. |
-| `get_ai_decision` | Scores a BUY/HOLD/SELL decision for BTC or ETH with risk breakdown. |
-| `get_opportunities` | Surfaces ranked trade opportunities across BTC, ETH, SOL. |
-| `get_etf_flows` | Pulls live ETF inflow/outflow data for BTC or ETH spot ETFs. |
-| `get_market_overview` | Returns a broad market snapshot with top movers. |
-| `get_news` | Fetches latest crypto headlines with sentiment classification. |
-| `get_live_chart` | Returns candlestick chart data for a given symbol. |
+**Available tools:**
+
+| Tool | Trigger | Data Source |
+|---|---|---|
+| `get_market_narrative` | Market regime, briefing, macro questions | SoSoValue ETF + news + Binance prices |
+| `get_ai_decision` | BUY/SELL/HOLD questions, asset-specific | Binance prices + SoSoValue ETF + news |
+| `get_opportunities` | "Top opportunities", "what to trade" | Binance prices + news sentiment |
+| `get_etf_flows` | ETF inflow/outflow questions | SoSoValue ETF metrics + history |
+| `get_market_overview` | Price overview, movers | Binance ticker |
+| `get_news` | News, headlines, sentiment | SoSoValue news featured |
+| `get_live_chart` | "Show me BTC chart" | TradingView widget embed |
 
 ### Phase 2: Synthesize
-After all tools complete, the AI synthesizes a data-driven analytical response that references real numbers from the tool results.
+After all tools complete, results are trimmed and sent back to Gemini with the `SYNTH_PROMPT`. The AI writes a 120–250 word analytical response that:
+- References every key number in **bold**
+- Interprets each number (not just lists it)
+- Closes with risk flags and an actionable takeaway
 
-## 4. Decision Engine
+---
 
-The `ai-decision` edge function produces a structured trade signal:
+## 4. AI Decision Engine
 
-```json
+The `ai-decision` edge function accepts:
+```typescript
 {
-  "action": "BUY",
-  "confidence": 72,
-  "asset": "BTC",
-  "timeframe": "medium",
-  "risk_level": "medium",
-  "entry": 104500,
-  "stop_loss": 99200,
-  "target": 112000,
-  "risk_reward": "1:2.4",
-  "reasoning": {
-    "sentiment": "Neutral",
-    "momentum": "Bullish",
-    "institutional": "Bullish"
-  },
-  "risk_breakdown": {
-    "volatility": "Medium",
-    "news_stability": "Medium",
-    "liquidity": "High"
-  }
+  mode: "signal" | "opportunities" | "narrative",
+  asset: "BTC" | "ETH",
+  timeframe: "short" | "medium" | "long",
+  riskTolerance: "low" | "medium" | "high",
+  marketData: { price, change24h, volume24h, marketCap },
+  etfFlow: { dailyInflow, weeklyInflow, inflowChangePercent, trend },
+  newsSentiment: { positive, negative, neutral, headlines[] }
 }
 ```
 
-## 5. UI Components
+Returns a structured signal:
+```json
+{
+  "action": "HOLD",
+  "confidence": 40,
+  "conviction": "low",
+  "summary": "BTC holds at $75,456 with mixed signals...",
+  "reasoning": ["Price dropped -1.62%...", "ETF outflow -$105M..."],
+  "signals": { "momentum": "bearish", "institutional": "bearish", "sentiment": "neutral" },
+  "riskBreakdown": { "volatility": "medium", "newsStability": "high", "liquidity": "high" },
+  "tradeSetup": { "entry": 75456, "stopLoss": 70000, "target": 80000, "riskReward": 0.8 }
+}
+```
 
-Each tool result renders as a rich visualization:
+---
 
-| Component | Tool | Renders |
+## 5. FlowPulse Strategy Card
+
+Automatically renders in chat when **both** `get_market_narrative` and `get_ai_decision` tools complete in the same message.
+
+### Allocation Methodology
+
+Allocations are derived directly from the AI decision signal:
+
+| Signal | BTC | ETH | SOL | USDC | Regime |
+|---|---|---|---|---|---|
+| BUY (risk-on) | 40% | 30% | 20% | 10% | Accumulation / Trending Up |
+| HOLD (balanced) | 25% | 25% | 20% | 30% | Consolidation / Mixed |
+| SELL (defensive) | 10% | 10% | 20% | 60% | Distribution / Risk-off |
+
+The strategy card shows:
+- **Regime badge**: accumulation / trending_up / consolidation / volatile / distribution
+- **Allocation bars**: per-asset weight with colored progress bars
+- **Narrative**: 2–3 sentence market memo from the narrative engine
+- **AI Reasoning**: transparent bullet list of WHY the AI made this decision
+- **Confidence**: 0–100 score with conviction label
+- **Publish button**: opens wallet confirmation modal
+
+---
+
+## 6. Wave 2 — On-Chain Strategy Publishing
+
+### Flow
+```
+1. FlowPulse Strategy Card appears after full market briefing
+2. User clicks "Publish to Base Testnet"
+3. PublishConfirmModal shows strategy summary + gas info
+4. User clicks "Publish On-Chain" → MetaMask opens
+5. wallet_switchEthereumChain to Base Sepolia (0x14A34 / chainId 84532)
+   - Auto-adds chain if not present (error code 4902)
+6. eth_sendTransaction: self-send with strategy SHA-256 hash as calldata
+7. txHash returned → stored in Supabase strategy_records
+8. User sees Basescan link: https://sepolia.basescan.org/tx/{txHash}
+9. Strategy visible in /strategies history page
+```
+
+### Strategy Hash
+Strategy is hashed using SubtleCrypto SHA-256 (browser native, no extra package):
+```
+hash = SHA-256(memo + JSON.stringify(allocation))
+```
+The hash is stored as the `data` field in the Base Sepolia transaction, creating a permanent, timestamped on-chain proof of the AI-generated strategy.
+
+### strategy_records Table Schema
+```sql
+id             uuid PRIMARY KEY
+owner_key      text NOT NULL          -- wallet address (RLS key)
+strategy_hash  text NOT NULL          -- SHA-256 of memo + allocation
+tx_hash        text                   -- Base Sepolia transaction hash (nullable if local-only)
+base_sepolia_block bigint             -- block number
+regime         text                   -- market regime at publish time
+allocation     jsonb                  -- { BTC: 40, ETH: 30, SOL: 20, USDC: 10 }
+memo           text                   -- full narrative memo
+reasoning      jsonb                  -- AI reasoning array
+confidence     integer                -- 0-100
+created_at     timestamptz
+```
+
+Row-level security: all reads and writes scoped to `owner_key = x-owner-key header`.
+
+---
+
+## 7. UI Components
+
+| Component | Trigger | Renders |
 |---|---|---|
-| `MarketNarrativeView` | `get_market_narrative` | Regime badge, key themes, sector breakdown. |
-| `AiDecisionView` | `get_ai_decision` | Action badge, confidence meter, entry/SL/target, risk breakdown. |
-| `OpportunityDiscoveryView` | `get_opportunities` | Ranked opportunity cards with momentum scores. |
-| `EtfFlowView` | `get_etf_flows` | Flow chart, fund-level breakdown, daily/weekly totals. |
-| `MarketOverviewView` | `get_market_overview` | Top movers grid, market cap, 24h volume. |
-| `NewsFeedView` | `get_news` | Headline cards with sentiment badges. |
-| `LiveChartView` | `get_live_chart` | Candlestick chart with price and volume. |
+| `MarketNarrativeView` | `get_market_narrative` | Regime badge, key themes, sector breakdown |
+| `AiDecisionView` | `get_ai_decision` | Action, confidence, entry/SL/target, risk breakdown |
+| `OpportunityDiscoveryView` | `get_opportunities` | Ranked opportunity cards with momentum scores |
+| `EtfFlowView` | `get_etf_flows` | Flow chart, fund-level table, daily/weekly totals |
+| `MarketOverviewView` | `get_market_overview` | Top movers grid |
+| `NewsFeedView` | `get_news` | Headline cards with sentiment badges |
+| `LiveChartView` | `get_live_chart` | TradingView candlestick chart |
+| `FlowPulseStrategyCard` | narrative + decision both present | Regime, allocation bars, reasoning, Publish button |
+| `PublishConfirmModal` | "Publish to Base" clicked | MetaMask confirmation + success state with Basescan link |
 
-All tool steps display as an animated carousel during loading, then inline with the AI's response.
+---
 
-## 6. Authentication
+## 8. Authentication & Data Isolation
 
-- **Wallet-based**: MetaMask / Coinbase Wallet / any EVM-compatible wallet.
-- **Non-custodial**: the app never holds keys.
-- **Chat history**: persisted per wallet address in Supabase.
+- **Non-custodial**: MetaMask / any EVM wallet. App never holds private keys.
+- **Owner key**: wallet address used as `owner_key` in all DB tables.
+- **RLS**: Supabase row-level security on `conversations`, `messages`, `strategy_records`.
+- **Header**: `x-owner-key` passed in all Supabase function calls for server-side filtering.
 
-## 7. Database Tables
+---
 
-| Table | Purpose |
-|---|---|
-| `conversations` | Chat conversation metadata (title, owner, timestamps). |
-| `messages` | Individual chat messages with tool step data. |
+## 9. Edge Functions
 
-Rows are scoped by `owner_key` through Supabase RLS.
+| Function | Runtime | Purpose |
+|---|---|---|
+| `sosovalue` | Deno | SoSoValue API proxy + Binance price enrichment + caching |
+| `ai-chat` | Deno | Two-phase plan+synthesize AI orchestration |
+| `ai-decision` | Deno | Structured signal engine (BUY/HOLD/SELL + trade setup) |
 
-## 8. Edge Functions
+---
 
-| Function | Purpose |
-|---|---|
-| `sosovalue` | Proxies and caches SoSoValue API requests. |
-| `ai-chat` | Two-phase tool-calling AI (plan → synthesize). |
-| `ai-decision` | Structured BUY/HOLD/SELL signal generation. |
-
-## 9. Tech Stack
+## 10. Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | React + TypeScript + Vite |
-| Styling | Vanilla CSS + shadcn/ui components |
+| Frontend | React 18 + TypeScript + Vite |
+| Styling | Vanilla CSS + shadcn/ui + Framer Motion |
 | Backend | Supabase Edge Functions (Deno) |
-| AI | Google Gemini (via Supabase AI) |
-| Data | SoSoValue REST API |
-| Auth | MetaMask wallet (EVM) |
-| Charts | Recharts |
+| AI | Google Gemini (via Lovable AI Gateway) |
+| Data | SoSoValue REST API v1/v2 |
+| Prices | Binance Public Ticker API (no key required) |
+| Auth | MetaMask / EVM wallet |
+| On-Chain | Base Sepolia Testnet (EIP-1193) |
+| Charts | Recharts + TradingView widget |
+| Database | Supabase Postgres + RLS |
 
-## 10. Demo Positioning
+---
 
-DefiScope should be presented as:
+## 11. Demo Flow (Wave 2)
 
-> An AI-powered research assistant for crypto, built on the SoSoValue API. Ask any market question in plain English and get an instant, data-backed answer — complete with ETF flow analysis, sentiment scoring, and AI-scored trade signals.
-
-This maps directly to the Builderthon asks:
-
-- Clear user value: instant answers to crypto questions, not raw data.
-- Clear use case: AI research assistant / market intelligence desk.
-- Complete flow: Question → Data → Analysis → Answer.
-- Required integration: SoSoValue API (prices, ETF flows, news).
-- Differentiator: tool-calling architecture with visible step-by-step data pipeline.
+1. Connect wallet (MetaMask)
+2. Ask: *"Run a full market briefing"*
+3. Watch 3–4 tools run in parallel (ETF flows, narrative, opportunities)
+4. FlowPulse Strategy Card appears with regime, allocation, reasoning
+5. Click **"Publish to Base Testnet"** → confirm in MetaMask
+6. See txHash + Basescan link
+7. Visit `/strategies` to see the published strategy history
