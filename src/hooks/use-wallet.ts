@@ -34,7 +34,7 @@ function walletRank(provider: Eip1193Provider) {
   return 99;
 }
 
-function getAllowedProvider(): Eip1193Provider | null {
+export function getAllowedProvider(): Eip1193Provider | null {
   const ethereum = (window as any).ethereum as Eip1193Provider | undefined;
   const standalone = [
     (window as any).rabby,
@@ -44,7 +44,7 @@ function getAllowedProvider(): Eip1193Provider | null {
 
   if (!ethereum && standalone.length === 0) return null;
 
-  const injected = Array.isArray(ethereum.providers)
+  const injected = Array.isArray(ethereum?.providers)
     ? ethereum.providers
     : ethereum
       ? [ethereum]
@@ -54,6 +54,8 @@ function getAllowedProvider(): Eip1193Provider | null {
     .filter(isAllowedWallet)
     .sort((a, b) => walletRank(a) - walletRank(b))[0] || null;
 }
+
+
 
 export function useWallet() {
   const [state, setState] = useState<WalletState>(() => {

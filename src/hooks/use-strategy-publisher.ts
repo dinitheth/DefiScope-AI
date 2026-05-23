@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { getAllowedProvider } from "@/hooks/use-wallet";
+
 
 export interface StrategyData {
   memo: string;
@@ -39,22 +41,22 @@ export function useStrategyPublisher() {
       const strategyHash = await hashStrategy(strategy.memo + JSON.stringify(strategy.allocation));
       let txHash: string | null = null;
 
-      // On-chain publish via MetaMask
-      if (publishOnChain && typeof window !== "undefined" && (window as any).ethereum) {
+      // On-chain publish — use the same provider the app's wallet is connected to
+      if (publishOnChain) {
         try {
-          const ethereum = (window as any).ethereum;
+          const ethereum = getAllowedProvider();
+          if (!ethereum) throw new Error("No supported wallet (MetaMask/Rabby/OKX) detected");
 
           // Request account access
           await ethereum.request({ method: "eth_requestAccounts" });
 
-          // Switch to Base Sepolia
+          // Switch to Base Sepolia (chainId 84532 = 0x14A34)
           try {
             await ethereum.request({
               method: "wallet_switchEthereumChain",
-              params: [{ chainId: "0x14A34" }], // 84532 in hex
+              params: [{ chainId: "0x14A34" }],
             });
           } catch (switchError: any) {
-            // Add Base Sepolia if not present
             if (switchError.code === 4902) {
               await ethereum.request({
                 method: "wallet_addEthereumChain",
@@ -66,26 +68,32 @@ export function useStrategyPublisher() {
                   blockExplorerUrls: ["https://sepolia.basescan.org"],
                 }],
               });
+              // Retry switch after adding
+              await ethereum.request({
+                method: "wallet_switchEthereumChain",
+                params: [{ chainId: "0x14A34" }],
+              });
+            } else {
+              throw switchError;
             }
           }
 
-          // Send a simple data transaction (no contract needed initially)
-          // The memo hash is stored in tx data field as proof
+          // Self-send tx: 0 ETH, strategy hash as calldata = permanent on-chain proof
           const txParams = {
             from: ownerKey,
-            to: ownerKey, // self-send as proof of timestamp
+            to: ownerKey,
             value: "0x0",
-            data: strategyHash, // hash as calldata = on-chain proof
+            data: strategyHash,
           };
-
           txHash = await ethereum.request({
             method: "eth_sendTransaction",
             params: [txParams],
-          });
+          }) as string;
         } catch (chainErr: any) {
-          console.warn("On-chain publish failed, saving to DB only:", chainErr.message);
+          console.warn("On-chain publish skipped:", chainErr.message);
         }
       }
+
 
       // Save to Supabase
       const { data: record, error: dbErr } = await supabase
