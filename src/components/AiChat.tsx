@@ -1519,32 +1519,44 @@ function MessageBubble({ message, onRetry, busy, walletAddress }: { message: Cha
           <ToolCarousel items={carouselItems} />
         )}
 
-        {/* 2a. FlowPulse Strategy Card — auto-appears when both narrative + decision data
-               are present in this message. Gives the user the Publish to Base Testnet button. */}
+        {/* 2a. FlowPulse Strategy Card — appears whenever market narrative data is present.
+               If ai-decision also ran, uses its signal for allocation; otherwise uses
+               regime-based default allocation so the Publish button is always accessible. */}
         {allStepsSettled && (() => {
           if (!message.steps) return null;
           const narrative = message.steps.find(s => s.name === "get_market_narrative" && s.result);
-          const decision = message.steps.find(s => s.name === "get_ai_decision" && s.result);
-          if (!narrative?.result || !decision?.result) return null;
+          if (!narrative?.result) return null;
           const n = narrative.result as NarrativeData;
-          const d = decision.result as DecisionData;
+          const decision = message.steps.find(s => s.name === "get_ai_decision" && s.result);
+          const d = decision?.result as DecisionData | undefined;
+
+          // Derive allocation: use AI decision signal if present, else use regime
+          const isRiskOn  = d?.action === "BUY"  || ["accumulation","trending_up"].includes(n.regime ?? "");
+          const isRiskOff = d?.action === "SELL" || ["distribution","volatile"].includes(n.regime ?? "");
           const allocation: Record<string, number> = {
-            BTC: d.action === "BUY" ? 40 : d.action === "SELL" ? 10 : 25,
-            ETH: d.action === "BUY" ? 30 : d.action === "SELL" ? 10 : 25,
-            SOL: 20,
-            USDC: d.action === "SELL" ? 60 : d.action === "HOLD" ? 30 : 10,
+            BTC:  isRiskOn ? 40 : isRiskOff ? 10 : 25,
+            ETH:  isRiskOn ? 30 : isRiskOff ? 10 : 25,
+            SOL:  20,
+            USDC: isRiskOff ? 60 : isRiskOn ? 10 : 30,
           };
+
+          // Build reasoning from decision if present, else derive from narrative themes
+          const reasoning: string[] = d?.reasoning?.length
+            ? d.reasoning
+            : (n.themes ?? []).slice(0, 4).map((t: string) => t);
+
           return (
             <FlowPulseStrategyCard
               regime={n.regime}
               allocation={allocation}
               memo={n.narrative}
-              reasoning={d.reasoning ?? []}
-              confidence={d.confidence}
+              reasoning={reasoning}
+              confidence={d?.confidence ?? 50}
               ownerKey={walletAddress}
             />
           );
         })()}
+
 
         {/* 2b. SoDEX trade result widget — shown when agent executed a quick_trade/close */}
         {!isUser && message.tradeResult && (
