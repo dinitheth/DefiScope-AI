@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Loader2, Check, Wrench, Plus, MessageSquare, Trash2, Menu, X, ArrowUp, Wallet, LogOut, ChevronDown, RefreshCw, Bot,
+  Loader2, Check, Wrench, Plus, MessageSquare, Trash2, Menu, X, ArrowUp, Wallet, LogOut, ChevronDown, RefreshCw, Bot, BarChart2,
 } from "lucide-react";
 
 import { useNavigate } from "react-router-dom";
@@ -128,6 +128,7 @@ export default function AiChat() {
   const history = useChatHistory();
   const isMobile = useIsMobile();
   const wallet = useWallet();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -496,6 +497,29 @@ export default function AiChat() {
                   </div>
                 );
               })}
+            </div>
+
+            {/* Strategies nav link */}
+            <div className="px-3 pb-3 border-t" style={{ borderColor: C.border }}>
+              <button
+                onClick={() => {
+                  if (isMobile) setSidebarOpen(false);
+                  navigate("/strategies");
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[12px] text-[13px] font-medium transition-colors mt-3"
+                style={{ color: C.textSecondary }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = C.surface;
+                  e.currentTarget.style.color = C.textPrimary;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = C.textSecondary;
+                }}
+              >
+                <BarChart2 size={14} className="shrink-0" />
+                Strategy History
+              </button>
             </div>
           </motion.aside>
         )}
