@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, TrendingUp, TrendingDown, Activity, ExternalLink,
-  Plus, Clock, Database, Zap,
+  Plus, Clock, Database, Zap, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useWallet } from "@/hooks/use-wallet";
@@ -40,12 +40,15 @@ interface StrategyRecord {
 
 function getRegimeConfig(regime: string | null) {
   if (!regime) return { label: "Unknown", color: C.textMuted, icon: Activity };
-  const r = regime.toLowerCase();
-  if (r.includes("risk-on") || r.includes("bull"))
+  const r = regime.toLowerCase().replace(/_/g, " ");
+  if (r.includes("risk-on") || r.includes("bull") || r.includes("accumulation") ||
+      r.includes("trending up") || r === "trending_up")
     return { label: "Risk-On", color: C.success, icon: TrendingUp };
-  if (r.includes("risk-off") || r.includes("bear"))
+  if (r.includes("risk-off") || r.includes("bear") || r.includes("distribution") ||
+      r.includes("trending down") || r === "trending_down" || r.includes("volatile"))
     return { label: "Risk-Off", color: C.danger, icon: TrendingDown };
-  return { label: "Mixed", color: C.warning, icon: Activity };
+  // consolidation, mixed, neutral all map to Mixed/Warning
+  return { label: regime.charAt(0).toUpperCase() + regime.slice(1).replace(/_/g, " "), color: C.warning, icon: Activity };
 }
 
 function formatDate(iso: string) {
@@ -61,6 +64,7 @@ function formatDate(iso: string) {
 }
 
 function StrategyCard({ record }: { record: StrategyRecord }) {
+  const [showReasoning, setShowReasoning] = useState(false);
   const regime = getRegimeConfig(record.regime);
   const RegimeIcon = regime.icon;
   const allocationEntries = record.allocation
@@ -154,6 +158,38 @@ function StrategyCard({ record }: { record: StrategyRecord }) {
           >
             {record.memo}
           </p>
+        )}
+
+        {/* Reasoning — collapsible */}
+        {record.reasoning && record.reasoning.length > 0 && (
+          <div>
+            <button
+              onClick={() => setShowReasoning(s => !s)}
+              className="flex items-center gap-1.5 text-[11px] transition-opacity opacity-60 hover:opacity-100"
+              style={{ color: C.accent }}
+            >
+              {showReasoning ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+              {showReasoning ? "Hide" : "Show"} AI Reasoning ({record.reasoning.length} signals)
+            </button>
+            <AnimatePresence>
+              {showReasoning && (
+                <motion.ul
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="mt-2 space-y-1.5 overflow-hidden"
+                >
+                  {record.reasoning.map((point, i) => (
+                    <li key={i} className="flex items-start gap-2 text-[12px]" style={{ color: C.textSecondary }}>
+                      <span className="mt-1.5 h-1 w-1 rounded-full shrink-0" style={{ background: C.accent }} />
+                      {point}
+                    </li>
+                  ))}
+                </motion.ul>
+              )}
+            </AnimatePresence>
+          </div>
         )}
 
         {/* Basescan link */}
