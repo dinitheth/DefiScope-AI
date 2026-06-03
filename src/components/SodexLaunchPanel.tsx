@@ -152,9 +152,8 @@ export default function SodexLaunchPanel({
     stopPct = `${stopDiff > 0 ? "+" : ""}${stopDiff.toFixed(2)}%`;
   }
 
-  // Get unique option list of symbols
-  const oppSymbols = (opportunities || []).map(o => o.symbol.toUpperCase());
-  const assetOptions = Array.from(new Set(["BTC", "ETH", "SOL", ...oppSymbols]));
+  // Only BTC, ETH, and SOL are supported in the selector dropdown
+  const assetOptions = ["BTC", "ETH", "SOL"];
 
   const orderSummary = `${finalSide} ${size} ${activeAsset} — AI Signal (${finalConfidence}% confidence)\nRegime: ${regime}\nPlatform: DefiScope AI x SoDEX Testnet`;
 
