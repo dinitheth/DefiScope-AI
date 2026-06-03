@@ -34,6 +34,12 @@ interface TradeSetup {
   riskReward: number;
 }
 
+interface SodexSignals {
+  momentum: string;
+  institutional: string;
+  sentiment: string;
+}
+
 interface SodexLaunchPanelProps {
   regime?: string;
   confidence?: number;
@@ -43,6 +49,7 @@ interface SodexLaunchPanelProps {
   memo?: string;
   allocation?: Record<string, number>;
   tradeSetup?: TradeSetup;
+  signals?: SodexSignals;
 }
 
 function RegimeBadge({ regime }: { regime: string }) {
@@ -69,6 +76,7 @@ export default function SodexLaunchPanel({
   memo,
   allocation,
   tradeSetup,
+  signals,
 }: SodexLaunchPanelProps) {
   const [copied, setCopied] = useState(false);
 
@@ -121,6 +129,12 @@ export default function SodexLaunchPanel({
 
   const orderSummary = `${side} ${size} ${asset} — AI Signal (${confidence}% confidence)\nRegime: ${regime}\nPlatform: DefiScope AI x SoDEX Testnet`;
 
+  const finalSignals = signals ?? {
+    momentum: side === "BUY" ? "bullish" : side === "SELL" ? "bearish" : "neutral",
+    institutional: "neutral",
+    sentiment: "neutral",
+  };
+
   function handleCopy() {
     navigator.clipboard.writeText(orderSummary).then(() => {
       setCopied(true);
@@ -166,6 +180,56 @@ export default function SodexLaunchPanel({
           </div>
           <div className="w-full relative bg-[#0D0E12]" style={{ height: "240px" }}>
             <TradingViewWidget symbol={tvSymbol} height={240} />
+          </div>
+        </motion.div>
+
+        {/* AI Market Signals */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.08 }}
+          className="rounded-2xl p-5 space-y-4 border"
+          style={{ background: C.panel, borderColor: C.border }}
+        >
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>
+              AI Market Signals
+            </p>
+            <div
+              className="px-2.5 py-1 rounded-[8px] text-[10px] font-bold"
+              style={{ background: `${sideColor}20`, color: sideColor }}
+            >
+              {side} Signal ({confidence}% Confidence)
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5">
+            {[
+              { label: "Momentum", value: finalSignals.momentum },
+              { label: "Institutional", value: finalSignals.institutional },
+              { label: "Sentiment", value: finalSignals.sentiment },
+            ].map(({ label, value }) => {
+              const valLower = (value || "neutral").toLowerCase();
+              const isBull = valLower === "bullish" || valLower === "bull";
+              const isBear = valLower === "bearish" || valLower === "bear";
+              const color = isBull ? C.success : isBear ? C.danger : C.textSecondary;
+              const bg = isBull ? `${C.success}10` : isBear ? `${C.danger}10` : `${C.surface}`;
+              const border = isBull ? `${C.success}20` : isBear ? `${C.danger}20` : C.border;
+              return (
+                <div
+                  key={label}
+                  className="p-2.5 rounded-xl border text-center transition-all"
+                  style={{ background: bg, borderColor: border }}
+                >
+                  <p className="text-[9px] uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>
+                    {label}
+                  </p>
+                  <p className="text-[11px] font-bold capitalize" style={{ color }}>
+                    {value}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         </motion.div>
 

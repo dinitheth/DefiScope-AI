@@ -631,6 +631,7 @@ export default function AiChat() {
                   memo={panelMemo}
                   tradeSetup={panelTradeSetup}
                   asset={latestDecision?.asset || "BTC"}
+                  signals={latestDecision?.signals}
                 />
               </div>
             </motion.div>
