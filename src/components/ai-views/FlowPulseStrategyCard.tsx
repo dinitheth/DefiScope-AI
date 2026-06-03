@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { TrendingUp, TrendingDown, Activity, Zap, ChevronDown, ChevronUp, Loader2, ExternalLink } from "lucide-react";
+import { TrendingUp, TrendingDown, Activity, Zap, ChevronDown, ChevronUp, Loader2, ExternalLink, RotateCcw } from "lucide-react";
 import PublishConfirmModal from "@/components/PublishConfirmModal";
 import SodexTradeWidget, { type SodexTradeResult } from "@/components/ai-views/SodexTradeWidget";
 import type { StrategyData } from "@/hooks/use-strategy-publisher";
-import { supabase } from "@/integrations/supabase/client";
+import { useSodexTrade } from "@/hooks/use-sodex-trade";
 import { toast } from "@/hooks/use-toast";
 
 interface FlowPulseStrategyCardProps {
@@ -103,8 +103,7 @@ export default function FlowPulseStrategyCard({
   const [modalOpen, setModalOpen] = useState(false);
   const [showReasoning, setShowReasoning] = useState(true);
   const [showScoreMethod, setShowScoreMethod] = useState(false);
-  const [sodexLoading, setSodexLoading] = useState(false);
-  const [sodexResult, setSodexResult] = useState<SodexTradeResult | null>(null);
+  const sodex = useSodexTrade();
 
   const regimeConfig = getRegimeConfig(regime);
   const RegimeIcon = regimeConfig.icon;
@@ -116,7 +115,7 @@ export default function FlowPulseStrategyCard({
 
   const strategy: StrategyData = { memo, allocation, reasoning, regime, confidence };
 
-  async function executeOnSodex() {
+  async function handleSodexExecute() {
     if (!ownerKey) {
       toast({ title: "Wallet not connected", description: "Connect your wallet to execute trades", variant: "destructive" });
       return;
@@ -125,31 +124,12 @@ export default function FlowPulseStrategyCard({
       toast({ title: "Neutral regime", description: "No directional trade recommended in mixed market" });
       return;
     }
-    setSodexLoading(true);
-    setSodexResult(null);
-    try {
-      const res = await supabase.functions.invoke("sodex-executor", {
-        body: {
-          action: "newOrder",
-          asset: "BTC",
-          market: "spot",
-          side: sodexSide,
-          size: "0.001",
-        },
-        headers: { "x-owner-key": ownerKey ?? "" },
-      });
-      const d = res.data as SodexTradeResult;
-      setSodexResult(d);
-      if (d?.ok) {
-        toast({ title: "SoDEX order submitted", description: `${sodexSide} BTC · Order: ${d.clOrdID?.slice(0, 16)}…` });
-      } else {
-        toast({ title: "SoDEX order failed", description: d?.message || "Check SODEX_API_PRIVATE_KEY secret", variant: "destructive" });
-      }
-    } catch (err: any) {
-      toast({ title: "SoDEX error", description: err.message || "Network error", variant: "destructive" });
-    } finally {
-      setSodexLoading(false);
-    }
+    await sodex.execute(ownerKey, {
+      asset: "BTC",
+      market: "spot",
+      side: sodexSide,
+      size: "0.001",
+    });
   }
 
   return (
@@ -309,43 +289,83 @@ export default function FlowPulseStrategyCard({
         {/* Action row: SoDEX Execute + Publish */}
         <div className="px-5 py-4 space-y-3">
           {/* SoDEX Execute button */}
-          {sodexSide && !sodexResult && (
-            <button
-              onClick={executeOnSodex}
-              disabled={sodexLoading}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-[14px] text-[13px] font-semibold transition-all disabled:opacity-60 active:scale-[0.99]"
-              style={{
-                background: sodexSide === "BUY" ? `${C.success}20` : `${C.danger}20`,
-                border: `1px solid ${sodexSide === "BUY" ? C.success : C.danger}40`,
-                color: sodexSide === "BUY" ? C.success : C.danger,
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = sodexSide === "BUY" ? `${C.success}30` : `${C.danger}30`;
-                e.currentTarget.style.borderColor = sodexSide === "BUY" ? C.success : C.danger;
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = sodexSide === "BUY" ? `${C.success}20` : `${C.danger}20`;
-                e.currentTarget.style.borderColor = sodexSide === "BUY" ? `${C.success}40` : `${C.danger}40`;
-              }}
-            >
-              {sodexLoading ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : sodexSide === "BUY" ? (
-                <TrendingUp size={14} />
-              ) : (
-                <TrendingDown size={14} />
+          {sodexSide && !sodex.isDone && (
+            <div className="space-y-2">
+              <button
+                onClick={handleSodexExecute}
+                disabled={sodex.isLoading}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-[14px] text-[13px] font-semibold transition-all disabled:opacity-60 active:scale-[0.99]"
+                style={{
+                  background: sodexSide === "BUY" ? `${C.success}20` : `${C.danger}20`,
+                  border: `1px solid ${sodexSide === "BUY" ? C.success : C.danger}40`,
+                  color: sodexSide === "BUY" ? C.success : C.danger,
+                }}
+                onMouseEnter={e => {
+                  if (!sodex.isLoading) {
+                    e.currentTarget.style.background = sodexSide === "BUY" ? `${C.success}30` : `${C.danger}30`;
+                    e.currentTarget.style.borderColor = sodexSide === "BUY" ? C.success : C.danger;
+                  }
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = sodexSide === "BUY" ? `${C.success}20` : `${C.danger}20`;
+                  e.currentTarget.style.borderColor = sodexSide === "BUY" ? `${C.success}40` : `${C.danger}40`;
+                }}
+              >
+                {sodex.isLoading ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : sodexSide === "BUY" ? (
+                  <TrendingUp size={14} />
+                ) : (
+                  <TrendingDown size={14} />
+                )}
+                {sodex.isLoading ? sodex.stateLabel : `Execute ${sodexSide} BTC on SoDEX Testnet`}
+              </button>
+
+              {/* Step indicator when signing */}
+              {sodex.isLoading && (
+                <p className="text-center text-[11px]" style={{ color: C.textMuted }}>
+                  {sodex.state === "signing" ? "👛 Check your MetaMask for a signing request" : sodex.stateLabel}
+                </p>
               )}
-              {sodexLoading ? "Submitting to SoDEX…" : `Execute ${sodexSide} BTC on SoDEX Testnet`}
-            </button>
+
+              {/* Registration required message */}
+              {sodex.isError && sodex.outcome?.registrationRequired && (
+                <div
+                  className="p-3 rounded-xl text-[12px]"
+                  style={{ background: `${C.warning}10`, border: `1px solid ${C.warning}30`, color: C.warning }}
+                >
+                  <p className="font-semibold mb-1">SoDEX Registration Required</p>
+                  <p className="mb-2" style={{ color: C.textSecondary }}>Visit testnet.sodex.com, connect your wallet, and complete onboarding first.</p>
+                  <a
+                    href="https://testnet.sodex.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 font-semibold"
+                    style={{ color: C.accent }}
+                  >
+                    Open SoDEX Testnet <ExternalLink size={11} />
+                  </a>
+                </div>
+              )}
+            </div>
           )}
 
-          {/* SoDEX result widget inline */}
-          {sodexResult && (
-            <SodexTradeWidget result={sodexResult} ownerKey={ownerKey} />
+          {/* SoDEX success result */}
+          {sodex.isDone && sodex.outcome && (
+            <div className="space-y-2">
+              <SodexTradeWidget result={sodex.outcome as any} ownerKey={ownerKey} />
+              <button
+                onClick={sodex.reset}
+                className="flex items-center gap-1.5 text-[11px] mx-auto transition-opacity opacity-50 hover:opacity-100"
+                style={{ color: C.textMuted }}
+              >
+                <RotateCcw size={10} /> Execute another trade
+              </button>
+            </div>
           )}
 
           {/* SoDEX testnet link */}
-          {!sodexResult && (
+          {!sodex.isDone && (
             <div className="flex items-center justify-center gap-1.5">
               <ExternalLink size={10} style={{ color: C.textDim }} />
               <a
@@ -355,7 +375,7 @@ export default function FlowPulseStrategyCard({
                 className="text-[10px] transition-opacity opacity-40 hover:opacity-80"
                 style={{ color: C.textSecondary }}
               >
-                SoDEX Testnet
+                SoDEX Testnet · No real funds
               </a>
             </div>
           )}
