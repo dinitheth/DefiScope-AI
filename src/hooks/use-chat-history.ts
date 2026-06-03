@@ -74,10 +74,15 @@ export function useChatHistory() {
       .insert({ owner_key: ownerKey, title })
       .select("id")
       .single();
-    if (error || !data) return null;
+    if (error) {
+      console.error("[chat-history] createConversation error:", error.code, error.message, error.details);
+      return null;
+    }
+    if (!data) return null;
     await refresh();
     return data.id;
   }, [ownerKey, refresh]);
+
 
   const renameConversation = useCallback(async (id: string, title: string) => {
     applyOwnerHeader(ownerKey);

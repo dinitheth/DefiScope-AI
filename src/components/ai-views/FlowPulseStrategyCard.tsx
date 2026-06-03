@@ -109,9 +109,10 @@ export default function FlowPulseStrategyCard({
   const RegimeIcon = regimeConfig.icon;
 
   // Derive SoDEX action: prefer explicit decisionAction, fall back to regime
-  const sodexSide = decisionAction === "BUY" ? "BUY"
-    : decisionAction === "SELL" ? "SELL"
-    : regimeConfig.sodexSide;
+  // Default to BUY for neutral/mixed regime so the Execute button always shows
+  const sodexSide: "BUY" | "SELL" = decisionAction === "SELL" ? "SELL"
+    : decisionAction === "BUY" ? "BUY"
+    : (regimeConfig.sodexSide ?? "BUY");
 
   const strategy: StrategyData = { memo, allocation, reasoning, regime, confidence };
 
@@ -189,55 +190,14 @@ export default function FlowPulseStrategyCard({
 
         {/* Allocation bars */}
         <div className="px-5 py-4 space-y-3" style={{ borderBottom: `1px solid ${C.border}` }}>
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] uppercase tracking-wider" style={{ color: C.textMuted }}>
-              Allocation
-            </p>
-            <button
-              onClick={() => setShowScoreMethod(s => !s)}
-              className="flex items-center gap-1 text-[10px] transition-opacity opacity-50 hover:opacity-100"
-              style={{ color: C.accent }}
-            >
-              Score Methodology
-              {showScoreMethod ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-            </button>
-          </div>
+          <p className="text-[11px] uppercase tracking-wider mb-3" style={{ color: C.textMuted }}>
+            Allocation
+          </p>
           {Object.entries(allocation)
             .sort(([, a], [, b]) => b - a)
             .map(([asset, pct]) => (
               <AllocationBar key={asset} asset={asset} pct={pct} />
             ))}
-
-          {/* Score breakdown methodology */}
-          <AnimatePresence>
-            {showScoreMethod && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden"
-              >
-                <div
-                  className="mt-3 p-3 rounded-xl space-y-2"
-                  style={{ background: C.surface, border: `1px solid ${C.border}` }}
-                >
-                  <p className="text-[10px] uppercase tracking-wider mb-2" style={{ color: C.textMuted }}>
-                    Composite Score = Weighted Signal Average
-                  </p>
-                  {SCORE_WEIGHTS.map(({ label, weight, color }) => (
-                    <div key={label} className="flex items-center gap-3">
-                      <span className="text-[11px] flex-1" style={{ color: C.textSecondary }}>{label}</span>
-                      <div className="w-24 h-1 rounded-full overflow-hidden" style={{ background: `${color}20` }}>
-                        <div className="h-full rounded-full" style={{ width: `${weight * 3.33}%`, background: color }} />
-                      </div>
-                      <span className="text-[11px] font-mono w-8 text-right" style={{ color }}>{weight}%</span>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
 
         {/* Memo */}

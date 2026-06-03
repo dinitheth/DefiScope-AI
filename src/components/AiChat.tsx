@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Loader2, Check, Wrench, Plus, MessageSquare, Trash2, Menu, X, ArrowUp, Wallet, LogOut, ChevronDown, RefreshCw, Bot, BarChart2,
+  Loader2, Check, Wrench, Plus, MessageSquare, Trash2, Menu, X, ArrowUp, Wallet, LogOut, ChevronDown, RefreshCw, Bot, BarChart2, Columns2,
 } from "lucide-react";
 
 import { useNavigate } from "react-router-dom";
@@ -135,6 +135,7 @@ export default function AiChat() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
+  const [sodexPanelOpen, setSodexPanelOpen] = useState(false);
   const [now, setNow] = useState(() => formatTime());
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -155,6 +156,22 @@ export default function AiChat() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, busy]);
+
+  // Auto-open SoDEX side panel when a full market briefing completes
+  useEffect(() => {
+    if (isMobile) return; // don't split on mobile
+    const latestAssistant = [...messages].reverse().find(m => m.role === "assistant");
+    if (!latestAssistant?.steps) return;
+    const narrativeDone = latestAssistant.steps.some(
+      s => s.name === "get_market_narrative" && s.status === "done" && s.result
+    );
+    const allSettled = latestAssistant.steps.every(
+      s => s.status === "done" || s.status === "error"
+    );
+    if (narrativeDone && allSettled && !sodexPanelOpen) {
+      setSodexPanelOpen(true);
+    }
+  }, [messages, isMobile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-resize textarea
   useEffect(() => {
@@ -218,7 +235,13 @@ export default function AiChat() {
     if (!convoId) {
       const newId = await history.createConversation(text.slice(0, 60));
       if (!newId) {
-        toast({ title: "Couldn't create chat", description: "Database not reachable", variant: "destructive" });
+        // Check browser console for the actual Supabase error (RLS policy, network, etc.)
+        toast({
+          title: "Couldn't create chat",
+          description: "Database error — check browser console (F12) for details. You may need to run the RLS fix SQL in Supabase.",
+          variant: "destructive",
+        });
+
         setBusy(false);
         return;
       }
@@ -527,115 +550,171 @@ export default function AiChat() {
       </AnimatePresence>
 
       {/* Main content */}
-      <main className="flex-1 flex flex-col min-w-0" style={{ background: C.bg }}>
-        <TopBar onToggleSidebar={() => setSidebarOpen((s) => !s)} />
+      <main className="flex-1 flex min-w-0 overflow-hidden" style={{ background: C.bg }}>
 
-        {/* Chat area */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
-          <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-            <div className="space-y-6">
-              {messages.length === 0 ? (
-                <EmptyState time={now} walletAddress={wallet.address} onSend={send} />
-              ) : (
-                <>
-                {messages
-                  .filter((m) => !(m.role === "assistant" && m.content === "" && (!m.steps || m.steps.length === 0)))
-                  .map((m) => (
-                    <MessageBubble key={m.id} message={m} onRetry={handleRetry} busy={busy} walletAddress={wallet.address} />
-                  ))}
-                {showTyping && <TypingIndicator />}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-
-        <div className="px-4 sm:px-6 pb-4 sm:pb-5 pt-2" style={{ background: C.bg }}>
-          <div className="max-w-3xl mx-auto">
-            {messages.length === 0 && (
-              <div className="flex flex-wrap gap-2 mb-4 justify-center">
-                {SUGGESTIONS_CHAT.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => send(s)}
-                    disabled={busy}
-                    className="px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-full transition-all text-xs sm:text-sm shadow-sm disabled:opacity-50"
-                    style={{
-                      background: C.surface,
-                      border: `1px solid ${C.border}`,
-                      color: C.textSecondary,
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = C.borderHover;
-                      e.currentTarget.style.background = C.surfaceHover;
-                      e.currentTarget.style.color = C.textPrimary;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = C.border;
-                      e.currentTarget.style.background = C.surface;
-                      e.currentTarget.style.color = C.textSecondary;
-                    }}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <form
-              onSubmit={(e) => { e.preventDefault(); send(input); }}
-              className="relative rounded-[24px] shadow-sm"
-              style={{ background: C.surface, border: `1px solid ${C.border}` }}
+        {/* ── SoDEX side panel — left half ───────────────────────────── */}
+        <AnimatePresence initial={false}>
+          {sodexPanelOpen && !isMobile && (
+            <motion.div
+              key="sodex-panel"
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: "50%", opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+              className="shrink-0 flex flex-col border-r overflow-hidden"
+              style={{ borderColor: C.border }}
             >
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    send(input);
-                  }
-                }}
-                placeholder="Message DefiScope AI..."
-                disabled={busy}
-                rows={1}
-                className="w-full bg-transparent border-0 focus:ring-0 focus:outline-none resize-none pt-4 pb-14 pl-5 pr-5 text-[15px] sm:text-base scrollbar-hide block leading-relaxed disabled:opacity-50"
-                style={{ color: C.textPrimary, minHeight: "108px", maxHeight: "180px" }}
-              />
-
-              {/* Bottom bar — just the send button */}
-              <div className="absolute left-4 right-2 bottom-2 flex items-center justify-end gap-2">
+              {/* Panel header */}
+              <div
+                className="flex items-center justify-between px-4 py-3 border-b shrink-0"
+                style={{ background: C.panel, borderColor: C.border }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping" style={{ background: "#10B981", animationDuration: "2s" }} />
+                    <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#10B981" }} />
+                  </span>
+                  <span className="text-[13px] font-semibold" style={{ color: C.textPrimary }}>SoDEX Testnet</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md" style={{ background: "#F59E0B20", color: "#F59E0B" }}>Testnet</span>
+                </div>
                 <button
-                  type="submit"
-                  disabled={!input.trim() || busy}
-                  className="h-9 w-9 rounded-[12px] flex items-center justify-center transition-all duration-200"
-                  style={{
-                    background: input.trim() && !busy ? C.accent : C.surfaceHover,
-                    color: input.trim() && !busy ? "#FFFFFF" : C.textDim,
-                  }}
+                  onClick={() => setSodexPanelOpen(false)}
+                  className="p-1.5 rounded-lg transition-colors"
+                  style={{ color: C.textMuted }}
+                  onMouseEnter={e => (e.currentTarget.style.color = C.textPrimary)}
+                  onMouseLeave={e => (e.currentTarget.style.color = C.textMuted)}
                 >
-                  <ArrowUp size={18} />
+                  <X size={15} />
                 </button>
               </div>
-            </form>
+              {/* SoDEX iframe */}
+              <iframe
+                src="https://testnet.sodex.com"
+                className="flex-1 w-full border-0"
+                title="SoDEX Testnet"
+                allow="wallet; clipboard-write"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals"
+                style={{ background: "#0A0A0A" }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
+        {/* ── Chat panel — right half (or full width) ─────────────────── */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <TopBar
+            onToggleSidebar={() => setSidebarOpen((s) => !s)}
+            sodexPanelOpen={sodexPanelOpen}
+            onToggleSodex={() => setSodexPanelOpen(s => !s)}
+          />
 
-            <div className="flex justify-between items-center mt-3 px-1 gap-2">
-              <div className="flex items-center gap-2 text-[10px] shrink-0" style={{ color: C.textMuted }}>
-                <span className="relative flex items-center justify-center w-1.5 h-1.5">
-                  <span
-                    className="absolute inline-flex w-full h-full rounded-full opacity-75 animate-ping"
-                    style={{ background: C.success, animationDuration: "2s" }}
-                  />
-                  <span className="relative inline-flex rounded-full w-1.5 h-1.5" style={{ background: C.success }} />
-                </span>
-                LIVE • {now}
+          {/* Chat area */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
+            <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+              <div className="space-y-6">
+                {messages.length === 0 ? (
+                  <EmptyState time={now} walletAddress={wallet.address} onSend={send} />
+                ) : (
+                  <>
+                  {messages
+                    .filter((m) => !(m.role === "assistant" && m.content === "" && (!m.steps || m.steps.length === 0)))
+                    .map((m) => (
+                      <MessageBubble key={m.id} message={m} onRetry={handleRetry} busy={busy} walletAddress={wallet.address} />
+                    ))}
+                  {showTyping && <TypingIndicator />}
+                  </>
+                )}
               </div>
-              <span className="text-[10px] truncate text-right" style={{ color: C.textMuted }}>
-                SoSoValue · SoDEX Testnet
-              </span>
+            </div>
+          </div>
+
+
+          <div className="px-4 sm:px-6 pb-4 sm:pb-5 pt-2" style={{ background: C.bg }}>
+            <div className="max-w-3xl mx-auto">
+              {messages.length === 0 && (
+                <div className="flex flex-wrap gap-2 mb-4 justify-center">
+                  {SUGGESTIONS_CHAT.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => send(s)}
+                      disabled={busy}
+                      className="px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-full transition-all text-xs sm:text-sm shadow-sm disabled:opacity-50"
+                      style={{
+                        background: C.surface,
+                        border: `1px solid ${C.border}`,
+                        color: C.textSecondary,
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = C.borderHover;
+                        e.currentTarget.style.background = C.surfaceHover;
+                        e.currentTarget.style.color = C.textPrimary;
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = C.border;
+                        e.currentTarget.style.background = C.surface;
+                        e.currentTarget.style.color = C.textSecondary;
+                      }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <form
+                onSubmit={(e) => { e.preventDefault(); send(input); }}
+                className="relative rounded-[24px] shadow-sm"
+                style={{ background: C.surface, border: `1px solid ${C.border}` }}
+              >
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      send(input);
+                    }
+                  }}
+                  placeholder="Message DefiScope AI..."
+                  disabled={busy}
+                  rows={1}
+                  className="w-full bg-transparent border-0 focus:ring-0 focus:outline-none resize-none pt-4 pb-14 pl-5 pr-5 text-[15px] sm:text-base scrollbar-hide block leading-relaxed disabled:opacity-50"
+                  style={{ color: C.textPrimary, minHeight: "108px", maxHeight: "180px" }}
+                />
+
+                {/* Bottom bar — just the send button */}
+                <div className="absolute left-4 right-2 bottom-2 flex items-center justify-end gap-2">
+                  <button
+                    type="submit"
+                    disabled={!input.trim() || busy}
+                    className="h-9 w-9 rounded-[12px] flex items-center justify-center transition-all duration-200"
+                    style={{
+                      background: input.trim() && !busy ? C.accent : C.surfaceHover,
+                      color: input.trim() && !busy ? "#FFFFFF" : C.textDim,
+                    }}
+                  >
+                    <ArrowUp size={18} />
+                  </button>
+                </div>
+              </form>
+
+
+              <div className="flex justify-between items-center mt-3 px-1 gap-2">
+                <div className="flex items-center gap-2 text-[10px] shrink-0" style={{ color: C.textMuted }}>
+                  <span className="relative flex items-center justify-center w-1.5 h-1.5">
+                    <span
+                      className="absolute inline-flex w-full h-full rounded-full opacity-75 animate-ping"
+                      style={{ background: C.success, animationDuration: "2s" }}
+                    />
+                    <span className="relative inline-flex rounded-full w-1.5 h-1.5" style={{ background: C.success }} />
+                  </span>
+                  LIVE • {now}
+                </div>
+                <span className="text-[10px] truncate text-right" style={{ color: C.textMuted }}>
+                  SoSoValue · SoDEX Testnet
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -677,7 +756,15 @@ export default function AiChat() {
   );
 }
 
-function TopBar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
+function TopBar({
+  onToggleSidebar,
+  sodexPanelOpen,
+  onToggleSodex,
+}: {
+  onToggleSidebar: () => void;
+  sodexPanelOpen?: boolean;
+  onToggleSodex?: () => void;
+}) {
   const navigate = useNavigate();
   const { address, isConnected, isConnecting, connectMetaMask, disconnect } = useWallet();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -715,6 +802,28 @@ function TopBar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
           <span className="text-xs font-medium" style={{ color: C.success }}>LIVE</span>
           <span className="hidden sm:inline text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ml-1" style={{ background: `${C.accent}15`, color: C.accent, border: `1px solid ${C.accent}40` }}>Testnet</span>
         </div>
+
+        {/* SoDEX side-panel toggle */}
+        {onToggleSodex && (
+          <button
+            onClick={onToggleSodex}
+            title={sodexPanelOpen ? "Close SoDEX panel" : "Open SoDEX side panel"}
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-2 rounded-[12px] text-xs font-medium transition-all"
+            style={{
+              background: sodexPanelOpen ? `${C.accent}20` : "transparent",
+              border: `1px solid ${sodexPanelOpen ? C.accent : C.border}`,
+              color: sodexPanelOpen ? C.accent : C.textSecondary,
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = sodexPanelOpen ? C.accent : C.border;
+              e.currentTarget.style.color = sodexPanelOpen ? C.accent : C.textSecondary;
+            }}
+          >
+            <Columns2 size={14} />
+            <span>SoDEX</span>
+          </button>
+        )}
 
         <button
           onClick={() => navigate("/how-to-use")}
