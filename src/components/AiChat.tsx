@@ -431,6 +431,8 @@ export default function AiChat() {
   const latestNarrative = latestNarrativeStep?.result as NarrativeData | undefined;
   const latestDecisionStep = latestAssistant?.steps?.find(s => s.name === "get_ai_decision" && s.result);
   const latestDecision = latestDecisionStep?.result as DecisionData | undefined;
+  const latestOpportunitiesStep = latestAssistant?.steps?.find(s => s.name === "get_opportunities" && s.result);
+  const latestOpportunities = latestOpportunitiesStep?.result as OpportunitiesData | undefined;
 
   let panelRegime = undefined;
   let panelConfidence = undefined;
@@ -438,6 +440,11 @@ export default function AiChat() {
   let panelAllocation = undefined;
   let panelMemo = undefined;
   let panelTradeSetup = undefined;
+  let panelOpportunities = undefined;
+
+  if (latestOpportunities?.opportunities) {
+    panelOpportunities = latestOpportunities.opportunities;
+  }
 
   if (latestNarrative) {
     panelRegime = latestNarrative.regime;
@@ -632,6 +639,7 @@ export default function AiChat() {
                   tradeSetup={panelTradeSetup}
                   asset={latestDecision?.asset || "BTC"}
                   signals={latestDecision?.signals}
+                  opportunities={panelOpportunities}
                 />
               </div>
             </motion.div>

@@ -3,8 +3,9 @@ import {
   TrendingUp, TrendingDown, Activity, ExternalLink, Copy, Zap,
   Shield, Clock, BarChart2, CheckCircle2, Target, ShieldAlert
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import TradingViewWidget from "./TradingViewWidget";
+import { fetchCoinList } from "@/lib/sosovalue-api";
 
 const C = {
   bg: "#0A0A0A",
@@ -50,21 +51,7 @@ interface SodexLaunchPanelProps {
   allocation?: Record<string, number>;
   tradeSetup?: TradeSetup;
   signals?: SodexSignals;
-}
-
-function RegimeBadge({ regime }: { regime: string }) {
-  const r = (regime || "").toLowerCase().replace(/_/g, " ");
-  const isRiskOn = r.includes("bull") || r.includes("accumulation") || r.includes("trending up") || r.includes("risk-on");
-  const isRiskOff = r.includes("bear") || r.includes("distribution") || r.includes("trending down") || r.includes("volatile") || r.includes("risk-off");
-  const color = isRiskOn ? C.success : isRiskOff ? C.danger : C.warning;
-  const Icon = isRiskOn ? TrendingUp : isRiskOff ? TrendingDown : Activity;
-  const label = isRiskOn ? "Risk-On" : isRiskOff ? "Risk-Off" : regime.charAt(0).toUpperCase() + regime.slice(1).replace(/_/g, " ");
-  return (
-    <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-semibold" style={{ background: `${color}20`, color }}>
-      <Icon size={10} />
-      {label}
-    </span>
-  );
+  opportunities?: any[];
 }
 
 export default function SodexLaunchPanel({
@@ -77,10 +64,29 @@ export default function SodexLaunchPanel({
   allocation,
   tradeSetup,
   signals,
+  opportunities,
 }: SodexLaunchPanelProps) {
   const [copied, setCopied] = useState(false);
+  const [activeAsset, setActiveAsset] = useState(asset);
+  const [coinPrices, setCoinPrices] = useState<Record<string, number>>({});
 
-  const assetColor = ASSET_COLORS[asset] ?? ASSET_COLORS.DEFAULT;
+  useEffect(() => {
+    setActiveAsset(asset);
+  }, [asset]);
+
+  useEffect(() => {
+    fetchCoinList().then((coins) => {
+      const priceMap: Record<string, number> = {};
+      coins.forEach((c) => {
+        if (c.coinSymbol) {
+          priceMap[c.coinSymbol.toUpperCase()] = c.coinPrice;
+        }
+      });
+      setCoinPrices(priceMap);
+    }).catch(err => console.error("Error fetching coin list in panel:", err));
+  }, []);
+
+  const assetColor = ASSET_COLORS[activeAsset] ?? ASSET_COLORS.DEFAULT;
   const sideColor = side === "BUY" ? C.success : C.danger;
   const SideIcon = side === "BUY" ? TrendingUp : TrendingDown;
 
@@ -90,25 +96,44 @@ export default function SodexLaunchPanel({
     SOL: "BINANCE:SOLUSDT",
     USDC: "BINANCE:USDCUSDT",
   };
-  const tvSymbol = symbolMap[asset] ?? `BINANCE:${asset}USDT`;
+  const tvSymbol = symbolMap[activeAsset] ?? `BINANCE:${activeAsset}USDT`;
+
+  const PRICE_FALLBACKS: Record<string, number> = {
+    BTC: 66037,
+    ETH: 3450,
+    SOL: 145,
+    HYPE: 0.85,
+    USDC: 1.00,
+    USDT: 1.00,
+  };
+
+  // Find active opportunity details
+  const activeOpportunity = (opportunities || []).find(o => o.symbol.toUpperCase() === activeAsset.toUpperCase());
+  const isMainAsset = activeAsset.toUpperCase() === asset.toUpperCase();
+
+  const finalSide = isMainAsset ? side : (activeOpportunity?.action === "WATCH" ? "BUY" : (activeOpportunity?.action || "BUY"));
+  const finalConfidence = isMainAsset ? confidence : (activeOpportunity?.confidence || 52);
+
+  // Setup signals
+  const finalSignals = isMainAsset ? (signals ?? { momentum: "neutral", institutional: "neutral", sentiment: "neutral" }) : {
+    momentum: activeOpportunity?.action === "BUY" ? "bullish" : activeOpportunity?.action === "SELL" ? "bearish" : "neutral",
+    institutional: activeAsset === "ETH" || activeAsset === "BTC" ? (regime.includes("risk-on") ? "bullish" : "neutral") : "neutral",
+    sentiment: activeOpportunity ? (activeOpportunity.confidence > 70 ? "bullish" : "neutral") : "neutral",
+  };
 
   // Fallback default setup if none is provided to populate the signal diagram
-  const finalTradeSetup = tradeSetup ?? (asset === "BTC" ? {
-    entry: 66037,
-    stopLoss: 64500,
-    target: 69000,
-    riskReward: 2.0
-  } : asset === "ETH" ? {
-    entry: 3450,
-    stopLoss: 3300,
-    target: 3750,
-    riskReward: 2.0
-  } : {
-    entry: 145,
-    stopLoss: 135,
-    target: 165,
-    riskReward: 2.0
-  });
+  const finalTradeSetup = isMainAsset && tradeSetup ? tradeSetup : (() => {
+    const entry = coinPrices[activeAsset.toUpperCase()] ?? PRICE_FALLBACKS[activeAsset.toUpperCase()] ?? 1.00;
+    const isBuy = finalSide === "BUY";
+    const target = isBuy ? entry * 1.05 : entry * 0.95;
+    const stopLoss = isBuy ? entry * 0.975 : entry * 1.025;
+    return {
+      entry,
+      target,
+      stopLoss,
+      riskReward: 2.0,
+    };
+  })();
 
   const hasTradeSetup = !!finalTradeSetup && finalTradeSetup.entry > 0;
 
@@ -127,13 +152,11 @@ export default function SodexLaunchPanel({
     stopPct = `${stopDiff > 0 ? "+" : ""}${stopDiff.toFixed(2)}%`;
   }
 
-  const orderSummary = `${side} ${size} ${asset} — AI Signal (${confidence}% confidence)\nRegime: ${regime}\nPlatform: DefiScope AI x SoDEX Testnet`;
+  // Get unique option list of symbols
+  const oppSymbols = (opportunities || []).map(o => o.symbol.toUpperCase());
+  const assetOptions = Array.from(new Set(["BTC", "ETH", "SOL", ...oppSymbols]));
 
-  const finalSignals = signals ?? {
-    momentum: side === "BUY" ? "bullish" : side === "SELL" ? "bearish" : "neutral",
-    institutional: "neutral",
-    sentiment: "neutral",
-  };
+  const orderSummary = `${finalSide} ${size} ${activeAsset} — AI Signal (${finalConfidence}% confidence)\nRegime: ${regime}\nPlatform: DefiScope AI x SoDEX Testnet`;
 
   function handleCopy() {
     navigator.clipboard.writeText(orderSummary).then(() => {
@@ -146,16 +169,29 @@ export default function SodexLaunchPanel({
     window.open("https://testnet.sodex.com", "_blank", "noopener,noreferrer");
   }
 
-  const steps = [
-    { icon: Shield, text: "Connect your wallet on SoDEX" },
-    { icon: BarChart2, text: `Select ${asset}/USDC spot market` },
-    { icon: SideIcon, text: `Place ${side} order · ${size} ${asset}` },
-  ];
-
   return (
     <div className="h-full flex flex-col overflow-y-auto" style={{ background: C.bg }}>
       {/* Real-time Chart Widget & Visual Trade Setup */}
       <div className="px-6 pt-6 pb-6 space-y-4">
+        {/* Asset Selector */}
+        <div className="flex items-center justify-between p-4 rounded-2xl border" style={{ background: C.panel, borderColor: C.border }}>
+          <div className="flex items-center gap-2.5">
+            <BarChart2 size={15} style={{ color: C.accent }} />
+            <p className="text-[12px] font-bold text-white">Select Chart & Signals</p>
+          </div>
+          <select
+            value={activeAsset}
+            onChange={(e) => setActiveAsset(e.target.value)}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#141414] border border-[#1C1C1C] text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+          >
+            {assetOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Real-time Chart Widget */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -171,7 +207,7 @@ export default function SodexLaunchPanel({
                 <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: C.success }} />
               </span>
               <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: C.textPrimary }}>
-                {asset}/USDT Live Spot Chart
+                {activeAsset}/USDT Live Spot Chart
               </p>
             </div>
             <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold" style={{ background: `${C.accent}20`, color: C.accent }}>
@@ -199,7 +235,7 @@ export default function SodexLaunchPanel({
               className="px-2.5 py-1 rounded-[8px] text-[10px] font-bold"
               style={{ background: `${sideColor}20`, color: sideColor }}
             >
-              {side} Signal ({confidence}% Confidence)
+              {finalSide} Signal ({finalConfidence}% Confidence)
             </div>
           </div>
 
@@ -256,7 +292,7 @@ export default function SodexLaunchPanel({
               {/* Vertical slider gauge representation */}
               <div className="relative w-2.5 h-24 rounded-full bg-neutral-900 flex flex-col overflow-hidden shrink-0">
                 {/* For BUY trade: Top green, bottom red */}
-                {side === "BUY" ? (
+                {finalSide === "BUY" ? (
                   <>
                     <div className="w-full h-1/2 opacity-80" style={{ background: C.success }} />
                     <div className="w-full h-1/2 opacity-80" style={{ background: C.danger }} />
