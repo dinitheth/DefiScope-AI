@@ -178,8 +178,8 @@ export default function SodexLaunchPanel({
               TradingView
             </span>
           </div>
-          <div className="w-full relative bg-[#0D0E12]" style={{ height: "240px" }}>
-            <TradingViewWidget symbol={tvSymbol} height={240} />
+          <div className="w-full relative bg-[#0D0E12]" style={{ height: "380px" }}>
+            <TradingViewWidget symbol={tvSymbol} height={380} />
           </div>
         </motion.div>
 
