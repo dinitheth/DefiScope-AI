@@ -437,6 +437,7 @@ export default function AiChat() {
   let panelSide: "BUY" | "SELL" | undefined = undefined;
   let panelAllocation = undefined;
   let panelMemo = undefined;
+  let panelTradeSetup = undefined;
 
   if (latestNarrative) {
     panelRegime = latestNarrative.regime;
@@ -455,6 +456,7 @@ export default function AiChat() {
       USDC: isRiskOff ? 60 : isRiskOn ? 10 : 30,
     };
     panelConfidence = latestDecision?.confidence ?? 50;
+    panelTradeSetup = latestDecision?.tradeSetup;
   }
 
   return (
@@ -627,6 +629,8 @@ export default function AiChat() {
                   side={panelSide}
                   allocation={panelAllocation}
                   memo={panelMemo}
+                  tradeSetup={panelTradeSetup}
+                  asset={latestDecision?.asset || "BTC"}
                 />
               </div>
             </motion.div>
