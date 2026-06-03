@@ -140,91 +140,13 @@ export default function SodexLaunchPanel({
 
   return (
     <div className="h-full flex flex-col overflow-y-auto" style={{ background: C.bg }}>
-      {/* Header hero */}
-      <div className="px-6 pt-8 pb-6 space-y-4">
-        {/* AI Signal badge */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="flex items-center gap-2"
-        >
-          <div className="h-8 w-8 rounded-[10px] flex items-center justify-center" style={{ background: `${C.accent}20` }}>
-            <Zap size={15} style={{ color: C.accent }} />
-          </div>
-          <div>
-            <p className="text-[13px] font-bold" style={{ color: C.textPrimary }}>DefiScope AI Signal</p>
-            <p className="text-[10px] uppercase tracking-wider" style={{ color: C.textMuted }}>Ready to execute on SoDEX</p>
-          </div>
-        </motion.div>
-
-        {/* Big trade card */}
-        <motion.div
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.08 }}
-          className="rounded-2xl p-5 space-y-4"
-          style={{ background: C.panel, border: `1px solid ${sideColor}30` }}
-        >
-          {/* Asset + side */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div
-                className="h-12 w-12 rounded-2xl flex items-center justify-center text-lg font-black"
-                style={{ background: `${assetColor}15`, color: assetColor, border: `1px solid ${assetColor}30` }}
-              >
-                {asset[0]}
-              </div>
-              <div>
-                <p className="text-xl font-black" style={{ color: C.textPrimary }}>{asset}/USDC</p>
-                <p className="text-[11px]" style={{ color: C.textMuted }}>Spot · SoDEX Testnet</p>
-              </div>
-            </div>
-            <div
-              className="flex items-center gap-2 px-4 py-2.5 rounded-[14px] text-[15px] font-bold"
-              style={{ background: `${sideColor}20`, color: sideColor, border: `1px solid ${sideColor}40` }}
-            >
-              <SideIcon size={16} />
-              {side}
-            </div>
-          </div>
-
-          {/* Stats row */}
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: "Size", value: size, unit: asset, color: assetColor },
-              { label: "Confidence", value: `${confidence}%`, unit: "", color: confidence >= 70 ? C.success : C.warning },
-              { label: "Signal", value: side, unit: "", color: sideColor },
-            ].map(({ label, value, unit, color }) => (
-              <div key={label} className="rounded-xl p-3 text-center" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
-                <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>{label}</p>
-                <p className="text-[14px] font-bold" style={{ color }}>
-                  {value}<span className="text-[10px] ml-0.5" style={{ color: C.textMuted }}>{unit}</span>
-                </p>
-              </div>
-            ))}
-          </div>
-
-          {/* Regime + memo */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <RegimeBadge regime={regime} />
-            <span className="text-[11px]" style={{ color: C.textMuted }}>·</span>
-            <Clock size={11} style={{ color: C.textMuted }} />
-            <span className="text-[11px]" style={{ color: C.textMuted }}>Live signal</span>
-          </div>
-
-          {memo && (
-            <p className="text-[12px] leading-relaxed line-clamp-3" style={{ color: C.textSecondary }}>
-              {memo}
-            </p>
-          )}
-        </motion.div>
-
+      {/* Real-time Chart Widget & Visual Trade Setup */}
+      <div className="px-6 pt-6 pb-6 space-y-4">
         {/* Real-time Chart Widget */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.12 }}
+          transition={{ duration: 0.4, delay: 0.05 }}
           className="rounded-2xl overflow-hidden border"
           style={{ background: C.panel, borderColor: C.border }}
         >
@@ -252,7 +174,7 @@ export default function SodexLaunchPanel({
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.14 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
             className="rounded-2xl p-5 space-y-4 border"
             style={{ background: C.panel, borderColor: C.border }}
           >
@@ -325,58 +247,6 @@ export default function SodexLaunchPanel({
             </div>
           </motion.div>
         )}
-
-        {/* Allocation mini-bars */}
-        {allocation && Object.keys(allocation).length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.15 }}
-            className="rounded-xl p-4 space-y-2.5"
-            style={{ background: C.surface, border: `1px solid ${C.border}` }}
-          >
-            <p className="text-[10px] uppercase tracking-wider mb-2" style={{ color: C.textMuted }}>AI Portfolio Allocation</p>
-            {Object.entries(allocation)
-              .sort(([, a], [, b]) => b - a)
-              .map(([tkr, pct]) => {
-                const c = ASSET_COLORS[tkr] ?? ASSET_COLORS.DEFAULT;
-                return (
-                  <div key={tkr} className="flex items-center gap-3">
-                    <span className="text-[11px] font-semibold w-10 shrink-0" style={{ color: C.textSecondary }}>{tkr}</span>
-                    <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: `${c}20` }}>
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{ duration: 0.8, ease: "easeOut" }}
-                        className="h-full rounded-full"
-                        style={{ background: c }}
-                      />
-                    </div>
-                    <span className="text-[11px] font-mono w-8 text-right" style={{ color: c }}>{pct}%</span>
-                  </div>
-                );
-              })}
-          </motion.div>
-        )}
-
-        {/* Steps guide */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, delay: 0.22 }}
-          className="rounded-xl p-4 space-y-3"
-          style={{ background: C.surface, border: `1px solid ${C.border}` }}
-        >
-          <p className="text-[10px] uppercase tracking-wider" style={{ color: C.textMuted }}>How to execute</p>
-          {steps.map(({ icon: Icon, text }, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <div className="h-6 w-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${C.accent}15` }}>
-                <Icon size={12} style={{ color: C.accent }} />
-              </div>
-              <span className="text-[12px]" style={{ color: C.textSecondary }}>{text}</span>
-            </div>
-          ))}
-        </motion.div>
       </div>
 
       {/* Sticky CTA footer */}
