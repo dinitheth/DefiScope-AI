@@ -25,6 +25,7 @@ import LiveChartView from "./ai-views/LiveChartView";
 import AgentRecommendationView, { type AgentRecommendationData, type AgentSignal } from "./ai-views/AgentRecommendationView";
 import SodexTradeWidget, { type SodexTradeResult } from "./ai-views/SodexTradeWidget";
 import FlowPulseStrategyCard from "./ai-views/FlowPulseStrategyCard";
+import SodexLaunchPanel from "./SodexLaunchPanel";
 import ToolCarousel from "./ai-views/ToolCarousel";
 
 import Typewriter from "./ai-views/Typewriter";
@@ -424,6 +425,38 @@ export default function AiChat() {
       // Show typing only when the placeholder has NO steps yet (steps is null/undefined)
       (lastMsg.content === "" && (lastMsg.steps === undefined || lastMsg.steps === null)));
 
+  // Extract latest recommendation info for the SoDEX launch panel
+  const latestAssistant = [...messages].reverse().find(m => m.role === "assistant");
+  const latestNarrativeStep = latestAssistant?.steps?.find(s => s.name === "get_market_narrative" && s.result);
+  const latestNarrative = latestNarrativeStep?.result as NarrativeData | undefined;
+  const latestDecisionStep = latestAssistant?.steps?.find(s => s.name === "get_ai_decision" && s.result);
+  const latestDecision = latestDecisionStep?.result as DecisionData | undefined;
+
+  let panelRegime = undefined;
+  let panelConfidence = undefined;
+  let panelSide: "BUY" | "SELL" | undefined = undefined;
+  let panelAllocation = undefined;
+  let panelMemo = undefined;
+
+  if (latestNarrative) {
+    panelRegime = latestNarrative.regime;
+    panelMemo = latestNarrative.narrative;
+    
+    const isRiskOn  = latestDecision?.action === "BUY"  || ["accumulation","trending_up"].includes(latestNarrative.regime ?? "");
+    const isRiskOff = latestDecision?.action === "SELL" || ["distribution","volatile"].includes(latestNarrative.regime ?? "");
+    panelSide = latestDecision?.action === "SELL" ? "SELL"
+      : latestDecision?.action === "BUY" ? "BUY"
+      : (isRiskOff ? "SELL" : "BUY"); // default to BUY if mixed/unknown
+
+    panelAllocation = {
+      BTC:  isRiskOn ? 40 : isRiskOff ? 10 : 25,
+      ETH:  isRiskOn ? 30 : isRiskOff ? 10 : 25,
+      SOL:  20,
+      USDC: isRiskOff ? 60 : isRiskOn ? 10 : 30,
+    };
+    panelConfidence = latestDecision?.confidence ?? 50;
+  }
+
   return (
     <div
       className="flex h-[100dvh] w-full overflow-hidden"
@@ -587,15 +620,15 @@ export default function AiChat() {
                   <X size={15} />
                 </button>
               </div>
-              {/* SoDEX iframe */}
-              <iframe
-                src="https://testnet.sodex.com"
-                className="flex-1 w-full border-0"
-                title="SoDEX Testnet"
-                allow="wallet; clipboard-write"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals"
-                style={{ background: "#0A0A0A" }}
-              />
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <SodexLaunchPanel
+                  regime={panelRegime}
+                  confidence={panelConfidence}
+                  side={panelSide}
+                  allocation={panelAllocation}
+                  memo={panelMemo}
+                />
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
