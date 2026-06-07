@@ -146,11 +146,20 @@ export default function SodexLaunchPanel({
   let targetPct = "";
   let stopPct = "";
   if (hasTradeSetup) {
+    const isBuy = finalSide === "BUY";
     const targetDiff = ((finalTradeSetup.target - finalTradeSetup.entry) / finalTradeSetup.entry) * 100;
     const stopDiff = ((finalTradeSetup.stopLoss - finalTradeSetup.entry) / finalTradeSetup.entry) * 100;
-    targetPct = `${targetDiff > 0 ? "+" : ""}${targetDiff.toFixed(2)}%`;
-    stopPct = `${stopDiff > 0 ? "+" : ""}${stopDiff.toFixed(2)}%`;
+    
+    // Profit and risk relative to the trade direction:
+    // BUY: Profit when price goes up (targetDiff > 0), Risk when price goes down (stopDiff < 0)
+    // SELL: Profit when price goes down (targetDiff < 0), Risk when price goes up (stopDiff > 0)
+    const profitPct = isBuy ? targetDiff : -targetDiff;
+    const riskPct = isBuy ? stopDiff : -stopDiff;
+    
+    targetPct = `${profitPct > 0 ? "+" : ""}${profitPct.toFixed(2)}%`;
+    stopPct = `${riskPct > 0 ? "+" : ""}${riskPct.toFixed(2)}%`;
   }
+
 
   // Only BTC, ETH, and SOL are supported in the selector dropdown
   const assetOptions = ["BTC", "ETH", "SOL"];
@@ -300,11 +309,23 @@ export default function SodexLaunchPanel({
             style={{ background: C.panel, borderColor: C.border }}
           >
             <div className="flex items-center justify-between">
-              <p className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>
-                AI Trade Setup Diagram
-              </p>
-              <div className="px-2.5 py-1 rounded-[8px] text-[10px] font-bold" style={{ background: `${C.accent}20`, color: C.accent }}>
-                R:R 1:{finalTradeSetup.riskReward}
+              <div className="flex items-center gap-1.5">
+                {finalSide === "BUY" ? (
+                  <TrendingUp size={13} style={{ color: C.success }} />
+                ) : (
+                  <TrendingDown size={13} style={{ color: C.danger }} />
+                )}
+                <p className="text-[10px] uppercase tracking-wider font-extrabold" style={{ color: finalSide === "BUY" ? C.success : C.danger }}>
+                  AI {finalSide} Trade Setup
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: `${finalSide === "BUY" ? C.success : C.danger}15`, color: finalSide === "BUY" ? C.success : C.danger }}>
+                  {finalSide}
+                </span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: `${C.accent}20`, color: C.accent }}>
+                  R:R 1:{finalTradeSetup.riskReward}
+                </span>
               </div>
             </div>
 
@@ -330,15 +351,21 @@ export default function SodexLaunchPanel({
 
               {/* Levels text labels */}
               <div className="flex-1 flex flex-col justify-between h-24 text-[13px] font-mono">
-                {/* Target label (top) */}
+                {/* Top Level label (Target for BUY, Stop Loss for SELL) */}
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-emerald-400">
-                    <Target size={13} />
-                    <span className="font-sans font-bold text-[11px] uppercase tracking-wider">Target</span>
+                  <div className={`flex items-center gap-1.5 ${finalSide === "BUY" ? "text-emerald-400" : "text-rose-500"}`}>
+                    {finalSide === "BUY" ? <Target size={13} /> : <ShieldAlert size={13} />}
+                    <span className="font-sans font-bold text-[11px] uppercase tracking-wider">
+                      {finalSide === "BUY" ? "Target" : "Stop Loss"}
+                    </span>
                   </div>
                   <div className="text-right">
-                    <span className="font-bold text-white">{formatPrice(finalTradeSetup.target)}</span>
-                    <span className="text-[10px] text-emerald-400 ml-2 font-semibold">{targetPct}</span>
+                    <span className="font-bold text-white">
+                      {formatPrice(finalSide === "BUY" ? finalTradeSetup.target : finalTradeSetup.stopLoss)}
+                    </span>
+                    <span className={`text-[10px] ml-2 font-semibold ${finalSide === "BUY" ? "text-emerald-400" : "text-rose-500"}`}>
+                      {finalSide === "BUY" ? targetPct : stopPct}
+                    </span>
                   </div>
                 </div>
 
@@ -353,15 +380,21 @@ export default function SodexLaunchPanel({
                   </div>
                 </div>
 
-                {/* Stop Loss label (bottom) */}
+                {/* Bottom Level label (Stop Loss for BUY, Target for SELL) */}
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-rose-500">
-                    <ShieldAlert size={13} />
-                    <span className="font-sans font-bold text-[11px] uppercase tracking-wider">Stop Loss</span>
+                  <div className={`flex items-center gap-1.5 ${finalSide === "BUY" ? "text-rose-500" : "text-emerald-400"}`}>
+                    {finalSide === "BUY" ? <ShieldAlert size={13} /> : <Target size={13} />}
+                    <span className="font-sans font-bold text-[11px] uppercase tracking-wider">
+                      {finalSide === "BUY" ? "Stop Loss" : "Target"}
+                    </span>
                   </div>
                   <div className="text-right">
-                    <span className="font-bold text-white">{formatPrice(finalTradeSetup.stopLoss)}</span>
-                    <span className="text-[10px] text-rose-500 ml-2 font-semibold">{stopPct}</span>
+                    <span className="font-bold text-white">
+                      {formatPrice(finalSide === "BUY" ? finalTradeSetup.stopLoss : finalTradeSetup.target)}
+                    </span>
+                    <span className={`text-[10px] ml-2 font-semibold ${finalSide === "BUY" ? "text-rose-500" : "text-emerald-400"}`}>
+                      {finalSide === "BUY" ? stopPct : targetPct}
+                    </span>
                   </div>
                 </div>
               </div>
