@@ -24,6 +24,8 @@ DefiScope was **scaffolded with Lovable** (UI generation) and then **hand-develo
 - TypeScript / React 18 / Vite (frontend logic, tool orchestration, state management)
 - Supabase Edge Functions in Deno (all backend AI and data proxy logic)
 - Custom two-phase AI architecture (plan → synthesize) written from scratch
+- Direct Google Gemini API Integration (migrated from Lovable AI Gateway to resolve 500 server errors)
+- Live price data integration utilizing Binance public ticker API
 - Wave 3 on-chain strategy publishing layer built in-house (hook, modal, history page, DB migration; prepared for roadmap integration)
 
 Lovable manages Supabase deployment. All business logic, AI architecture, and on-chain features are custom-written.
@@ -146,11 +148,11 @@ Optional: Publish strategy hash to Base Sepolia via MetaMask
 | Frontend | React 18 + TypeScript + Vite |
 | Styling | Vanilla CSS + shadcn/ui + Framer Motion |
 | Backend | Supabase Edge Functions (Deno) |
-| AI | Google Gemini (via Lovable AI Gateway) |
+| AI | Google Gemini (Direct integration via Deno edge functions) |
 | Data | SoSoValue REST API v1/v2 |
 | Prices | Binance Public Ticker API (no key) |
 | Auth | MetaMask / EVM wallet (non-custodial) |
-| On-Chain | Base Sepolia Testnet (EIP-1193 via MetaMask) |
+| On-Chain | Base Sepolia Testnet (EIP-1193 via MetaMask; Wave 3 Roadmap) |
 | Charts | Recharts |
 | Database | Supabase Postgres + RLS |
 
