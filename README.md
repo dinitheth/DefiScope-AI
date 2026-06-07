@@ -24,7 +24,7 @@ DefiScope was **scaffolded with Lovable** (UI generation) and then **hand-develo
 - TypeScript / React 18 / Vite (frontend logic, tool orchestration, state management)
 - Supabase Edge Functions in Deno (all backend AI and data proxy logic)
 - Custom two-phase AI architecture (plan → synthesize) written from scratch
-- Wave 2 on-chain layer built entirely in-house (hook, modal, history page, DB migration)
+- Wave 3 on-chain strategy publishing layer built in-house (hook, modal, history page, DB migration; prepared for roadmap integration)
 
 Lovable manages Supabase deployment. All business logic, AI architecture, and on-chain features are custom-written.
 
@@ -43,8 +43,8 @@ Lovable manages Supabase deployment. All business logic, AI architecture, and on
 | **Live Charts** | Candlestick chart data per symbol. |
 | **FlowPulse Strategy Card** | Auto-generates after full market briefing: regime, allocation weights, AI reasoning, confidence. |
 | **SoDEX Launch Workspace** | Split-screen workspace on the left: interactive TradingView spot chart, AI signals, dynamic Target/Stop levels diagram, and wallet CTAs. |
-| **Publish to Base Testnet** | Hash strategy memo → MetaMask confirmation → self-send tx on Base Sepolia → Basescan link. |
-| **Strategy History** | All published strategies per wallet at `/strategies`, with on-chain proof links. |
+| **Publish to Base Testnet (Wave 3)** | Hash strategy memo → MetaMask confirmation → self-send tx on Base Sepolia → Basescan link. |
+| **Strategy History (Wave 3)** | All published strategies per wallet at `/strategies`, with on-chain proof links. |
 | **Persistent Chat** | Full conversation history per wallet via Supabase RLS. |
 
 ---
@@ -66,7 +66,7 @@ All SoSoValue calls are proxied through the `sosovalue` Supabase Edge Function w
 
 ---
 
-## Wave 2 — Base Testnet & SoDEX Panel Integration
+## Wave 2 — SoDEX Panel & Chart Workspace Integration
 
 ### SoDEX Launch Panel & Interactive Workspace
 Instead of using blocked third-party iframes, Wave 2 integrates a premium **SoDEX Launch Panel & Chart Workspace** in the split-screen dashboard:
@@ -78,6 +78,10 @@ Instead of using blocked third-party iframes, Wave 2 integrates a premium **SoDE
   - `⚠ Live Price Baseline`: Shows when loading other assets, guiding the user to run a specific briefing in the chat to get AI-verified signals.
 - **Visual Trade Setup Diagram**: Visualizes Entry, Target (with percentage gains), and Stop Loss (with percentage losses) calculated dynamically from real-time sosoValue coin prices.
 - **Action CTAs**: Safe deep-linking to SoDEX Testnet and copy order details utility.
+
+---
+
+## Wave 3 (Planned Roadmap) — Base Testnet Integration
 
 ### On-Chain Strategy Publishing Flow
 ```
