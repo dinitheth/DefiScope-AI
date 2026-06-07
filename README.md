@@ -111,6 +111,12 @@ Allocations are derived from the AI Decision Engine signal:
 
 Each weight reflects the signal conviction and is transparently shown with the full AI reasoning chain.
 
+### Rationale: Why Publish to Base Testnet?
+Publishing strategies on-chain to the Base blockchain serves several key technical and business purposes:
+1. **Cryptographic Proof of Strategy**: Hashing the strategy parameters (regime, allocation weights, reasoning, and timestamp) and writing the hash to Base Sepolia creates an irrefutable, time-stamped proof of your market outlook before prices move. This eliminates hindsight bias (no backdating or modifying historical records).
+2. **Transparent & Auditable Track Record**: It builds a public, tamper-proof registry of predictions. Anyone can audit your strategy history via Basescan or your public `/strategies` profile dashboard, establishing trust with co-investors, DAOs, or followers.
+3. **Decentralized Strategy Execution**: Registering strategy hashes on a public ledger paves the way for future smart contract integrations (non-custodial strategy automation) that can execute asset swaps on-chain (e.g., via Uniswap or SoDEX routers) directly matching your published allocations.
+
 ---
 
 ## Architecture
