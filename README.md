@@ -42,6 +42,7 @@ Lovable manages Supabase deployment. All business logic, AI architecture, and on
 | **Market Narrative** | Regime classification (accumulation, trending, volatile) with key drivers. |
 | **Live Charts** | Candlestick chart data per symbol. |
 | **FlowPulse Strategy Card** | Auto-generates after full market briefing: regime, allocation weights, AI reasoning, confidence. |
+| **SoDEX Launch Workspace** | Split-screen workspace on the left: interactive TradingView spot chart, AI signals, dynamic Target/Stop levels diagram, and wallet CTAs. |
 | **Publish to Base Testnet** | Hash strategy memo → MetaMask confirmation → self-send tx on Base Sepolia → Basescan link. |
 | **Strategy History** | All published strategies per wallet at `/strategies`, with on-chain proof links. |
 | **Persistent Chat** | Full conversation history per wallet via Supabase RLS. |
@@ -65,7 +66,18 @@ All SoSoValue calls are proxied through the `sosovalue` Supabase Edge Function w
 
 ---
 
-## Wave 2 — Base Testnet Integration
+## Wave 2 — Base Testnet & SoDEX Panel Integration
+
+### SoDEX Launch Panel & Interactive Workspace
+Instead of using blocked third-party iframes, Wave 2 integrates a premium **SoDEX Launch Panel & Chart Workspace** in the split-screen dashboard:
+- **Interactive Asset Selector**: Toggle dynamically between `BTC`, `ETH`, and `SOL` in the side panel.
+- **TradingView Real-time Chart**: Displays live candlestick spot chart widgets for the chosen asset.
+- **AI Market Signals**: Displays Momentum, Institutional, and Sentiment indicators.
+- **AI Verification Status**:
+  - `✓ AI Verified`: Shows in green when signals are derived from the latest AI decision run (inputs: live prices, ETF flows, and news sentiment).
+  - `⚠ Live Price Baseline`: Shows when loading other assets, guiding the user to run a specific briefing in the chat to get AI-verified signals.
+- **Visual Trade Setup Diagram**: Visualizes Entry, Target (with percentage gains), and Stop Loss (with percentage losses) calculated dynamically from real-time sosoValue coin prices.
+- **Action CTAs**: Safe deep-linking to SoDEX Testnet and copy order details utility.
 
 ### On-Chain Strategy Publishing Flow
 ```
