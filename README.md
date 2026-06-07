@@ -1,6 +1,6 @@
 # DefiScope AI
 
-> AI-powered on-chain finance intelligence — ask any crypto question, get live data-backed answers, and publish verifiable strategy records to Base Testnet.
+> AI-powered on-chain finance intelligence — ask any crypto question, get live data-backed answers, and utilize the interactive SoDEX workspace panel.
 
 [![SoSoValue Buildathon 2026](https://img.shields.io/badge/SoSoValue-Buildathon%202026-blue)](https://sosovalue.com)
 [![Wave 2 Complete](https://img.shields.io/badge/Wave-2%20Complete-green)](https://github.com/dinitheth/DefiScope-AI)
@@ -25,7 +25,7 @@ Users ask market questions in plain English, and the app turns SoSoValue data in
 Question → Live Data → AI Decision → Visual Output
 ```
 
-> 🆕 **FlowPulse Strategy Publisher** — Turns DefiScope into an AI strategy desk that generates market regimes, ranked opportunities, BTC/ETH/SOL/USDC allocations, and risk-aware plans, with 1-click publishing to Base Sepolia Testnet.
+> 🆕 **FlowPulse Strategy Publisher** — Turns DefiScope into an AI strategy desk that generates market regimes, ranked opportunities, BTC/ETH/SOL/USDC allocations, and risk-aware plans.
 
 ---
 
