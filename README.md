@@ -3,175 +3,147 @@
 > AI-powered on-chain finance intelligence — ask any crypto question, get live data-backed answers, and publish verifiable strategy records to Base Testnet.
 
 [![SoSoValue Buildathon 2026](https://img.shields.io/badge/SoSoValue-Buildathon%202026-blue)](https://sosovalue.com)
-[![Wave 2](https://img.shields.io/badge/Wave-2%20Complete-green)](https://github.com/dinitheth/DefiScope-AI)
+[![Wave 2 Complete](https://img.shields.io/badge/Wave-2%20Complete-green)](https://github.com/dinitheth/DefiScope-AI)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
 
-## What is DefiScope?
+# 🚀 What It Does
 
-DefiScope is a conversational AI research assistant for crypto. Connect your wallet, ask questions in plain English, and the AI fetches live data from the SoSoValue API, runs intelligent analysis, and delivers clear data-backed answers — with rich visualizations.
+**DefiScope AI** is an AI-powered crypto intelligence workfloor built on **SoSoValue live data**.
 
-Then publish your strategy as a **verifiable on-chain record** to Base Testnet.
+Users ask market questions in plain English, and the app turns SoSoValue data into:
+- 📊 Market briefings
+- 💸 ETF flow analysis
+- 📰 News sentiment
+- 🧠 AI decisions (BUY/HOLD/SELL signals, confidence, and target/stop levels)
+- ⚡ Opportunity rankings
+- 📋 Strategy outputs
 
-**Data → Decision → Action → On-Chain Proof.**
+**The core flow is:**
+```
+Question → Live Data → AI Decision → Visual Output
+```
 
----
-
-## Development Toolchain
-
-DefiScope was **scaffolded with Lovable** (UI generation) and then **hand-developed** using:
-- TypeScript / React 18 / Vite (frontend logic, tool orchestration, state management)
-- Supabase Edge Functions in Deno (all backend AI and data proxy logic)
-- Custom two-phase AI architecture (plan → synthesize) written from scratch
-- Direct Google Gemini API Integration (migrated from Lovable AI Gateway to resolve 500 server errors)
-- Live price data integration utilizing Binance public ticker API
-- Wave 2 on-chain strategy publishing layer built in-house (hook, modal, history page, DB migration; fully integrated with Base Sepolia)
-
-Lovable manages Supabase deployment. All business logic, AI architecture, and on-chain features are custom-written.
+> 🆕 **FlowPulse Strategy Publisher** — Turns DefiScope into an AI strategy desk that generates market regimes, ranked opportunities, BTC/ETH/SOL/USDC allocations, and risk-aware plans, with 1-click publishing to Base Sepolia Testnet.
 
 ---
 
-## Features
+# 🎯 The Problem It Solves
 
-| Module | What it does |
+Crypto research is scattered across dashboards, charts, news feeds, ETF trackers, and exchanges. DefiScope brings that entire workflow into **one place**.
+
+Instead of showing raw data, it **explains what the data means**. A user can quickly understand:
+- 📈 Market direction
+- 💸 ETF flow pressure
+- 📰 News sentiment
+- ⚡ Opportunity quality
+- 🛡️ Risk — all before making a decision
+
+---
+
+# 🧩 Challenges We Ran Into
+
+The hardest part was making **live data reliable**. 
+
+Some SoSoValue endpoints provide market intelligence, while coin price data needed stronger normalization. The Opportunity Discovery panel was rendering, but some data was missing or empty.
+
+**Fixes applied:**
+- 🔧 Improved the SoSoValue client proxy
+- 🔧 Added `coinMarkets` integration for live Binance price data
+- 🔧 Added fallback opportunity ranking
+- 🔧 Made the UI handle empty states safely
+
+Another challenge was finding the **right use case**. A simple *"Trade BTC now"* agent felt too generic, so Agent mode was reframed into a **strategy publisher workflow** with Base Testnet proofs.
+
+---
+
+# 🛠️ Technologies Used
+
+| Category | Stack |
 |---|---|
-| **Two-Phase AI Chat** | Phase 1: AI plans which SoSoValue tools to call. Phase 2: AI synthesizes a data-driven analytical response. |
-| **AI Decision Engine** | BUY/HOLD/SELL signal with real entry, stop-loss, target prices from Binance live ticker. |
-| **ETF Flow Intelligence** | Live spot ETF inflows, AUM, and fund-level breakdown (IBIT, FBTC, ARKB, etc.) for BTC and ETH. |
-| **News + Sentiment** | Latest crypto headlines classified by sentiment. |
-| **Opportunity Discovery** | BTC, ETH, SOL trade opportunities ranked by momentum and flow signals. |
-| **Market Narrative** | Regime classification (accumulation, trending, volatile) with key drivers. |
-| **Live Charts** | Candlestick chart data per symbol. |
-| **FlowPulse Strategy Card** | Auto-generates after full market briefing: regime, allocation weights (pie chart), AI reasoning, confidence. |
-| **SoDEX Launch Workspace** | Split-screen workspace on the left: interactive TradingView spot chart, AI signals, dynamic Target/Stop levels diagram, and wallet CTAs. |
-| **Publish to Base Testnet (Wave 2)** | Hash strategy memo → MetaMask confirmation → self-send tx on Base Sepolia → Basescan link. |
-| **Strategy History (Wave 2)** | All published strategies per wallet at `/strategies`, with on-chain proof links. |
-| **Persistent Chat** | Full conversation history per wallet via Supabase RLS. |
+| **Frontend** | React 18 + TypeScript + Vite |
+| **Styling** | Vanilla CSS + Tailwind CSS + shadcn/ui + Framer Motion |
+| **Backend** | Supabase Edge Functions (Deno DBR) |
+| **AI** | Two-phase tool-calling workflow using Google Gemini API |
+| **Data** | SoSoValue API (ETF metrics, history, news sentiment) |
+| **Prices** | Binance Public Ticker API (no key required, cached) |
+| **On-chain** | Base Sepolia Testnet (EIP-1193 MetaMask self-send hashes as calldata) + SoDEX Testnet integration |
+| **Deployment** | Vercel |
 
 ---
 
-## SoSoValue API Integration
+# 🏗️ How We Built It
 
-DefiScope uses the following **live SoSoValue API endpoints**:
+DefiScope uses a **two-step AI flow**.
 
-| Endpoint | Path | Used For |
-|---|---|---|
-| ETF Metrics | `POST /openapi/v2/etf/currentEtfDataMetrics` | Per-fund AUM, daily inflow, cumulative flow |
-| ETF Inflow History | `POST /openapi/v2/etf/historicalInflowChart` | 30-day flow chart data |
-| News Featured | `GET /openapi/v1/news/featured` | Latest headlines with sentiment |
-| Coin List | `POST /openapi/v1/data/default/coin/list` | Coin directory (fallback) |
+### Step 1 — Tool Selection
+The AI decides which tools to call based on the user's question:
+- 📊 Market narrative
+- 💸 ETF flows
+- ⚡ Opportunity discovery
+- 📰 News sentiment
+- 🧠 AI decision signal
+- 📈 Live chart
 
-Coin prices are enriched with **Binance public ticker** (`GET /api/v3/ticker/24hr`) — no additional API key required — to provide real-time BTC/ETH/SOL entry, stop-loss, and target values in the AI Decision Engine.
+### Step 2 — Synthesis & Rendering
+Those tools fetch live data through a **Supabase Edge Function** that keeps API keys server-side. The AI then writes a clear answer and the UI renders **rich panels inline**.
 
-All SoSoValue calls are proxied through the `sosovalue` Supabase Edge Function with server-side auth, 90-second caching, rate limiting (18 req/min), and graceful degradation.
-
----
-
-## Wave 2 — SoDEX Panel, Chart Workspace & Base Testnet Integration
-
-### SoDEX Launch Panel & Interactive Workspace
-Instead of using blocked third-party iframes, Wave 2 integrates a premium **SoDEX Launch Panel & Chart Workspace** in the split-screen dashboard:
-- **Interactive Asset Selector**: Toggle dynamically between `BTC`, `ETH`, and `SOL` in the side panel.
-- **TradingView Real-time Chart**: Displays live candlestick spot chart widgets for the chosen asset.
-- **AI Market Signals**: Displays Momentum, Institutional, and Sentiment indicators.
-- **AI Verification Status**:
-  - `✓ AI Verified`: Shows in green when signals are derived from the latest AI decision run (inputs: live prices, ETF flows, and news sentiment).
-  - `⚠ Live Price Baseline`: Shows when loading other assets, guiding the user to run a specific briefing in the chat to get AI-verified signals.
-- **Visual Trade Setup Diagram**: Visualizes Entry, Target (with percentage gains), and Stop Loss (with percentage losses) calculated dynamically from real-time sosoValue coin prices.
-- **Action CTAs**: Safe deep-linking to SoDEX Testnet and copy order details utility.
-
-### On-Chain Strategy Publishing Flow
-Publish your AI-generated FlowPulse strategy directly to the Base Sepolia testnet:
-1. **Auto-Generation**: Run a full market briefing in the chat, and the **FlowPulse Strategy Card** automatically appears with the AI-determined regime, asset allocations, reasoning chain, and confidence score.
-2. **One-Click Publish**: Click "Publish to Base Testnet" to trigger the MetaMask wallet confirmation.
-3. **Chain Auto-Switching**: Automatically prompts to switch network to Base Sepolia (Chain ID `0x14A34`) if connected to another network.
-4. **On-Chain Cryptographic Proof**: Hashing the strategy parameters (regime, allocation weights, reasoning, and timestamp) and writing the hash to Base Sepolia creates an irrefutable, time-stamped proof of your market outlook before prices move. This eliminates hindsight bias (no backdating or modifying historical records).
-5. **Database Syncing & Registry**: The transaction hash is stored in the Supabase `strategy_records` table, automatically indexing your published strategy.
-6. **Basescan Verification**: Instantly generates a Basescan explorer link and lists the strategy under your public portfolio at `/strategies`.
-
+For Agent mode, **FlowPulse** turns that data into:
 ```
-Full Market Briefing (narrative + decision)
-        ↓
-FlowPulse Strategy Card auto-appears
-(regime, allocation, reasoning, confidence)
-        ↓
-User clicks "Publish to Base Testnet"
-        ↓
-PublishConfirmModal (MetaMask wallet confirmation)
-        ↓
-Switch to Base Sepolia (chain 0x14A34) if needed
-        ↓
-eth_sendTransaction — strategy hash as calldata
-        ↓
-txHash stored in Supabase strategy_records
-        ↓
-Basescan link shown + visible in /strategies
-```
-
-### FlowPulse Allocation Methodology
-Allocations are derived from the AI Decision Engine signal:
-- **BUY signal** → BTC 40%, ETH 30%, SOL 20%, USDC 10% (risk-on)
-- **HOLD signal** → BTC 25%, ETH 25%, SOL 20%, USDC 30% (balanced)
-- **SELL signal** → BTC 10%, ETH 10%, SOL 20%, USDC 60% (defensive)
-
-Each weight reflects the signal conviction and is transparently shown with the full AI reasoning chain.
-
-### Rationale: Why Publish to Base Testnet?
-Publishing strategies on-chain to the Base blockchain serves several key technical and business purposes:
-1. **Cryptographic Proof of Strategy**: Hashing the strategy parameters and writing the hash to Base Sepolia creates an irrefutable, time-stamped proof of your market outlook before prices move. This eliminates hindsight bias (no backdating or modifying historical records).
-2. **Transparent & Auditable Track Record**: It builds a public, tamper-proof registry of predictions. Anyone can audit your strategy history via Basescan or your public `/strategies` profile dashboard, establishing trust with co-investors, DAOs, or followers.
-3. **Decentralized Strategy Execution**: Registering strategy hashes on a public ledger paves the way for future smart contract integrations (non-custodial strategy automation) that can execute asset swaps on-chain (e.g., via Uniswap or SoDEX routers) directly matching your published allocations.
-
----
-
-## Architecture
-
-```
-User question (plain English)
-        ↓
-ai-chat Edge Function — Phase 1: Plan (which SoSoValue tools to call)
-        ↓
-Tools run in parallel:
-  sosovalue proxy → SoSoValue ETF API + Binance ticker
-  ai-decision Edge Function → BUY/HOLD/SELL signal
-        ↓
-ai-chat Edge Function — Phase 2: Synthesize (data-driven analytical response)
-        ↓
-Frontend renders: tool cards + FlowPulse Strategy Card (with Pie Chart) + AI text
-        ↓
-Optional: Publish strategy hash to Base Sepolia via MetaMask
+Strategy Memo → Allocation → Risk Notes → Optional Action
 ```
 
 ---
 
-## Tech Stack
+# 💡 What We Learned
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18 + TypeScript + Vite |
-| Styling | Vanilla CSS + shadcn/ui + Framer Motion |
-| Backend | Supabase Edge Functions (Deno) |
-| AI | Google Gemini (Direct integration via Deno edge functions) |
-| Data | SoSoValue REST API v1/v2 |
-| Prices | Binance Public Ticker API (no key) |
-| Auth | MetaMask / EVM wallet (non-custodial) |
-| On-Chain | Base Sepolia Testnet (EIP-1193 via MetaMask; Wave 2 Integration) |
-| Charts | Recharts |
-| Database | Supabase Postgres + RLS |
+The best product is **not just an AI trading button**.
+> The stronger use case is an **AI market intelligence and strategy desk**.
+
+We also learned that **data reliability matters as much as AI quality**. If API shapes change or return empty arrays, the user experience breaks entirely. Strong normalization, fallback logic, and clear empty states are **essential**.
 
 ---
 
-## Routes
+# 🔮 What's Next for DefiScope AI
 
-| Path | Purpose |
-|---|---|
-| `/` | Landing page |
-| `/dashboard` | AI Chat + FlowPulse Strategy |
-| `/strategies` | Strategy history with on-chain proofs |
-| `/how-to-use` | User guide |
+## 🌊 Current Wave (Wave 1) — Demo Ready
+This wave makes DefiScope **demo-ready**:
+- [x] SoSoValue live data pipeline
+- [x] Opportunity Discovery fixes
+- [x] FlowPulse Strategy Publisher
+- [x] Data → Decision → Action workflow
+- [x] Vercel deployment config
+- [x] Optional SoDEX Testnet action layer
 
 ---
+
+## 🌊🌊 Wave 2 — Base Testnet Integration (Completed!)
+Wave 2 adds **Base Testnet blockchain integration** to prove AI strategy authenticity:
+- [x] **MetaMask Wallet Confirmation Modal**: Interactive pop-up with wallet/gas summaries and auto-network switching to Base Sepolia (chain `0x14A34`).
+- [x] **Cryptographic Proof of Strategy**: Self-send 0-value transaction hashing strategy memos as transaction calldata.
+- [x] **Verifiable Strategy Records**: Storing verified strategy logs (tx hashes, regimes, allocations) in Supabase.
+- [x] **Explorer Integration**: Basescan tx links + visible in `/strategies` history page.
+- [x] **Animated Allocation Pie Chart**: Auto-drawing donut chart using Recharts for FlowPulse allocations.
+- [x] **Vertical Trade Setup Diagram**: Dynamically displaying Entry, Target, and Stop Loss relative to trade direction.
+
+---
+
+## 🌊🌊🌊 Wave 3 — Full On-Chain Strategy Platform (Planned Roadmap)
+Wave 3 expands DefiScope into a fuller **on-chain strategy platform**:
+- [ ] Tokenized strategy baskets on Base Testnet
+- [ ] Testnet rebalance simulation
+- [ ] Scheduled AI strategy updates
+- [ ] Followable public strategy profiles
+- [ ] AI index-publisher mode
+- [ ] Optional SoDEX execution for strategy actions
+
+### 🏁 Long-Term Vision
+> DefiScope becomes a **lightweight AI fund-manager assistant** that researches markets, explains decisions, publishes verifiable strategy records on Base Testnet, and connects those strategies to execution rails.
+
+---
+
+# 📂 Technical Details & API Architecture
 
 ## Database Tables
 
@@ -181,8 +153,6 @@ Optional: Publish strategy hash to Base Sepolia via MetaMask
 | `messages` | Individual messages with tool step data |
 | `strategy_records` | Published FlowPulse strategies with tx hashes |
 
----
-
 ## Edge Functions
 
 | Function | Purpose |
@@ -190,8 +160,6 @@ Optional: Publish strategy hash to Base Sepolia via MetaMask
 | `sosovalue` | SoSoValue proxy + cache + Binance price enrichment |
 | `ai-chat` | Two-phase tool-calling AI (plan → synthesize) |
 | `ai-decision` | Structured BUY/HOLD/SELL signal generation |
-
----
 
 ## Local Development
 
@@ -205,8 +173,6 @@ npm run dev
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
-
----
 
 ## Example Queries
 
