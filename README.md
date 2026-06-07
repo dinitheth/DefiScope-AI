@@ -54,7 +54,7 @@ Some SoSoValue endpoints provide market intelligence, while coin price data need
 - 🔧 Added fallback opportunity ranking
 - 🔧 Made the UI handle empty states safely
 
-Another challenge was finding the **right use case**. A simple *"Trade BTC now"* agent felt too generic, so Agent mode was reframed into a **strategy publisher workflow** with Base Testnet proofs.
+Another challenge was finding the **right use case**. A simple *"Trade BTC now"* agent felt too generic, so Agent mode was reframed into a **strategy publisher workflow** with Base Testnet proofs on the roadmap.
 
 ---
 
@@ -62,14 +62,14 @@ Another challenge was finding the **right use case**. A simple *"Trade BTC now"*
 
 | Category | Stack |
 |---|---|
-| **Frontend** | React 18 + TypeScript + Vite |
+| **Frontend** | React + TypeScript + Vite |
 | **Styling** | Vanilla CSS + Tailwind CSS + shadcn/ui + Framer Motion |
-| **Backend** | Supabase Edge Functions (Deno DBR) |
-| **AI** | Two-phase tool-calling workflow using Google Gemini API |
-| **Data** | SoSoValue API (ETF metrics, history, news sentiment) |
-| **Prices** | Binance Public Ticker API (no key required, cached) |
-| **On-chain** | Base Sepolia Testnet (EIP-1193 MetaMask self-send hashes as calldata) + SoDEX Testnet integration |
+| **Backend** | Supabase + Edge Functions |
+| **Data** | SoSoValue API |
+| **AI** | AI decision / tool-calling workflow |
+| **On-chain** | SoDEX Testnet API |
 | **Deployment** | Vercel |
+| **Planned** | Base Testnet blockchain integration |
 
 ---
 
@@ -107,30 +107,35 @@ We also learned that **data reliability matters as much as AI quality**. If API 
 
 # 🔮 What's Next for DefiScope AI
 
-## 🌊 Current Wave (Wave 1) — Demo Ready
-This wave makes DefiScope **demo-ready**:
-- [x] SoSoValue live data pipeline
-- [x] Opportunity Discovery fixes
-- [x] FlowPulse Strategy Publisher
-- [x] Data → Decision → Action workflow
-- [x] Vercel deployment config
-- [x] Optional SoDEX Testnet action layer
+## 🌊 Current Wave (Wave 2) — SoDEX Panel & Interactive Workspace (Completed!)
 
----
-
-## 🌊🌊 Wave 2 — Base Testnet Integration (Completed!)
-Wave 2 adds **Base Testnet blockchain integration** to prove AI strategy authenticity:
-- [x] **MetaMask Wallet Confirmation Modal**: Interactive pop-up with wallet/gas summaries and auto-network switching to Base Sepolia (chain `0x14A34`).
-- [x] **Cryptographic Proof of Strategy**: Self-send 0-value transaction hashing strategy memos as transaction calldata.
-- [x] **Verifiable Strategy Records**: Storing verified strategy logs (tx hashes, regimes, allocations) in Supabase.
-- [x] **Explorer Integration**: Basescan tx links + visible in `/strategies` history page.
+Instead of using blocked third-party iframes, Wave 2 integrates a premium **SoDEX Launch Panel & Chart Workspace** in the split-screen dashboard:
+- [x] **Interactive Asset Selector**: Toggle dynamically between `BTC`, `ETH`, and `SOL` in the side panel.
+- [x] **TradingView Real-time Chart**: Displays live candlestick spot chart widgets for the chosen asset.
+- [x] **AI Market Signals**: Displays Momentum, Institutional, and Sentiment indicators.
+- [x] **AI Verification Status**:
+  - `✓ AI Verified`: Shows in green when signals are derived from the latest AI decision run (inputs: live prices, ETF flows, and news sentiment).
+  - `⚠ Live Price Baseline`: Shows when loading other assets, guiding the user to run a specific briefing in the chat to get AI-verified signals.
+- [x] **Visual Trade Setup Diagram**: Visualizes Entry, Target (with percentage gains), and Stop Loss (with percentage losses) calculated dynamically from real-time sosoValue coin prices.
+- [x] **Action CTAs**: Safe deep-linking to SoDEX Testnet and copy order details utility.
 - [x] **Animated Allocation Pie Chart**: Auto-drawing donut chart using Recharts for FlowPulse allocations.
-- [x] **Vertical Trade Setup Diagram**: Dynamically displaying Entry, Target, and Stop Loss relative to trade direction.
 
 ---
 
-## 🌊🌊🌊 Wave 3 — Full On-Chain Strategy Platform (Planned Roadmap)
-Wave 3 expands DefiScope into a fuller **on-chain strategy platform**:
+## 🌊🌊 Wave 3 — Base Testnet Integration (Planned Roadmap)
+
+Wave 3 adds **Base Testnet blockchain integration** to prove AI strategy authenticity:
+- [ ] Publish FlowPulse strategy memo hashes on Base Testnet
+- [ ] Create verifiable AI-generated strategy records
+- [ ] Link public strategy pages to on-chain proofs
+- [ ] Add wallet confirmation before publishing
+- [ ] Track strategy history over time
+
+---
+
+## 🌊🌊🌊 Wave 4 — Full On-Chain Strategy Platform (Planned Roadmap)
+
+Wave 4 expands DefiScope into a fuller **on-chain strategy platform**:
 - [ ] Tokenized strategy baskets on Base Testnet
 - [ ] Testnet rebalance simulation
 - [ ] Scheduled AI strategy updates
