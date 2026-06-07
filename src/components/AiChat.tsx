@@ -462,7 +462,7 @@ export default function AiChat() {
       SOL:  20,
       USDC: isRiskOff ? 60 : isRiskOn ? 10 : 30,
     };
-    panelConfidence = latestDecision?.confidence ?? 50;
+    panelConfidence = latestDecision?.confidence; // No fallback — only show real AI confidence
     panelTradeSetup = latestDecision?.tradeSetup;
   }
 
