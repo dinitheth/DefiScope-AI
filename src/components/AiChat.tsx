@@ -1708,6 +1708,7 @@ function MessageBubble({ message, onRetry, busy, walletAddress }: { message: Cha
               reasoning={reasoning}
               confidence={d?.confidence ?? 50}
               ownerKey={walletAddress}
+              decisionAction={d?.action}
             />
           );
         })()}

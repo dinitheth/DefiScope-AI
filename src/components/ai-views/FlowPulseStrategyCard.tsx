@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { TrendingUp, TrendingDown, Activity, Zap, ChevronDown, ChevronUp, Loader2, ExternalLink, RotateCcw } from "lucide-react";
+import { TrendingUp, TrendingDown, Activity, Zap, ChevronDown, ChevronUp, Loader2, ExternalLink } from "lucide-react";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import PublishConfirmModal from "@/components/PublishConfirmModal";
 import SodexTradeWidget, { type SodexTradeResult } from "@/components/ai-views/SodexTradeWidget";
 import type { StrategyData } from "@/hooks/use-strategy-publisher";
@@ -54,43 +55,6 @@ function getRegimeConfig(regime: string) {
   return { label: "Mixed", color: C.warning, bg: `${C.warning}20`, icon: Activity, sodexSide: null };
 }
 
-function AllocationBar({ asset, pct }: { asset: string; pct: number }) {
-  const color = ASSET_COLORS[asset] ?? ASSET_COLORS.DEFAULT;
-  return (
-    <div className="flex items-center gap-3">
-      <span
-        className="text-[12px] font-semibold w-12 shrink-0"
-        style={{ color: C.textSecondary }}
-      >
-        {asset}
-      </span>
-      <div
-        className="flex-1 h-1.5 rounded-full overflow-hidden"
-        style={{ background: `${color}20` }}
-      >
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${pct}%` }}
-          transition={{ duration: 0.8, ease: "easeOut" }}
-          className="h-full rounded-full"
-          style={{ background: color }}
-        />
-      </div>
-      <span className="text-[12px] font-medium w-9 text-right shrink-0" style={{ color }}>
-        {pct}%
-      </span>
-    </div>
-  );
-}
-
-// Scoring breakdown methodology for transparency
-const SCORE_WEIGHTS = [
-  { label: "Price Momentum", weight: 30, color: "#F59E0B" },
-  { label: "ETF Flow Signal", weight: 25, color: "#8B5CF6" },
-  { label: "News Sentiment", weight: 25, color: "#10B981" },
-  { label: "Volume Strength", weight: 20, color: "#3B82F6" },
-];
-
 export default function FlowPulseStrategyCard({
   regime,
   allocation,
@@ -102,7 +66,6 @@ export default function FlowPulseStrategyCard({
 }: FlowPulseStrategyCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [showReasoning, setShowReasoning] = useState(true);
-  const [showScoreMethod, setShowScoreMethod] = useState(false);
   const sodex = useSodexTrade();
 
   const regimeConfig = getRegimeConfig(regime);
@@ -116,22 +79,13 @@ export default function FlowPulseStrategyCard({
 
   const strategy: StrategyData = { memo, allocation, reasoning, regime, confidence };
 
-  async function handleSodexExecute() {
-    if (!ownerKey) {
-      toast({ title: "Wallet not connected", description: "Connect your wallet to execute trades", variant: "destructive" });
-      return;
-    }
-    if (!sodexSide) {
-      toast({ title: "Neutral regime", description: "No directional trade recommended in mixed market" });
-      return;
-    }
-    await sodex.execute(ownerKey, {
-      asset: "BTC",
-      market: "spot",
-      side: sodexSide,
-      size: "0.001",
-    });
-  }
+  const chartData = Object.entries(allocation)
+    .filter(([, pct]) => pct > 0)
+    .map(([asset, pct]) => ({
+      name: asset,
+      value: pct,
+      color: ASSET_COLORS[asset] ?? ASSET_COLORS.DEFAULT,
+    }));
 
   return (
     <>
@@ -139,7 +93,7 @@ export default function FlowPulseStrategyCard({
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: "easeOut" }}
-        className="rounded-2xl overflow-hidden"
+        className="rounded-2xl overflow-hidden shadow-lg"
         style={{
           background: C.panel,
           border: `1px solid ${C.border}`,
@@ -188,20 +142,80 @@ export default function FlowPulseStrategyCard({
           </div>
         </div>
 
-        {/* Allocation bars */}
-        <div className="px-5 py-4 space-y-3" style={{ borderBottom: `1px solid ${C.border}` }}>
-          <p className="text-[11px] uppercase tracking-wider mb-3" style={{ color: C.textMuted }}>
-            Allocation
+        {/* Allocation Pie Chart */}
+        <div className="px-5 py-5 border-b" style={{ borderColor: C.border }}>
+          <p className="text-[11px] uppercase tracking-wider mb-4 text-left font-semibold" style={{ color: C.textMuted }}>
+            Allocation Breakdown
           </p>
-          {Object.entries(allocation)
-            .sort(([, a], [, b]) => b - a)
-            .map(([asset, pct]) => (
-              <AllocationBar key={asset} asset={asset} pct={pct} />
-            ))}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
+            {/* Pie Chart container */}
+            <div className="w-[130px] h-[130px] flex items-center justify-center relative shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={chartData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={36}
+                    outerRadius={56}
+                    paddingAngle={3}
+                    dataKey="value"
+                    isAnimationActive={true}
+                    animationDuration={1000}
+                  >
+                    {chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} stroke={C.panel} strokeWidth={2} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div
+                            className="px-2 py-1 rounded border text-[11px] font-semibold"
+                            style={{ background: C.surface, borderColor: C.border, color: C.textPrimary }}
+                          >
+                            {data.name}: {data.value}%
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              {/* Center label */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <span className="text-[9px] uppercase tracking-wider font-semibold" style={{ color: C.textMuted }}>
+                  Total
+                </span>
+                <span className="text-[13px] font-extrabold text-white">
+                  100%
+                </span>
+              </div>
+            </div>
+
+            {/* Legend list */}
+            <div className="flex-1 w-full space-y-2">
+              {chartData.map((item) => (
+                <div key={item.name} className="flex items-center justify-between px-3 py-2 rounded-xl" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: item.color }} />
+                    <span className="text-[12px] font-bold text-white">{item.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] font-bold" style={{ color: item.color }}>{item.value}%</span>
+                    <span className="text-[10px] text-muted-foreground">allocation</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Memo */}
-        <div className="px-5 pt-4 pb-3" style={{ borderBottom: `1px solid ${C.border}` }}>
+        <div className="px-5 pt-4 pb-3 border-b" style={{ borderColor: C.border }}>
           <p className="text-[11px] uppercase tracking-wider mb-2" style={{ color: C.textMuted }}>
             Strategy Memo
           </p>
@@ -212,7 +226,7 @@ export default function FlowPulseStrategyCard({
 
         {/* Reasoning — collapsible */}
         {reasoning && reasoning.length > 0 && (
-          <div className="px-5 pt-3 pb-3" style={{ borderBottom: `1px solid ${C.border}` }}>
+          <div className="px-5 pt-3 pb-3 border-b" style={{ borderColor: C.border }}>
             <button
               onClick={() => setShowReasoning(s => !s)}
               className="flex items-center gap-1.5 w-full text-left mb-2"
@@ -245,7 +259,31 @@ export default function FlowPulseStrategyCard({
             </AnimatePresence>
           </div>
         )}
+
+        {/* Publish to Base Sepolia Testnet CTA */}
+        <div className="px-5 py-4" style={{ background: "rgba(0, 0, 0, 0.15)" }}>
+          <button
+            onClick={() => setModalOpen(true)}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold transition-all active:scale-[0.99] border hover:opacity-95"
+            style={{
+              background: C.accent,
+              borderColor: C.accent,
+              color: "#FFFFFF",
+              boxShadow: `0 4px 12px ${C.accent}30`
+            }}
+          >
+            <Zap size={14} fill="#FFFFFF" />
+            Publish to Base Testnet
+          </button>
+        </div>
       </motion.div>
+
+      <PublishConfirmModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        strategy={strategy}
+        ownerKey={ownerKey || ""}
+      />
     </>
   );
 }

@@ -26,7 +26,7 @@ DefiScope was **scaffolded with Lovable** (UI generation) and then **hand-develo
 - Custom two-phase AI architecture (plan → synthesize) written from scratch
 - Direct Google Gemini API Integration (migrated from Lovable AI Gateway to resolve 500 server errors)
 - Live price data integration utilizing Binance public ticker API
-- Wave 3 on-chain strategy publishing layer built in-house (hook, modal, history page, DB migration; prepared for roadmap integration)
+- Wave 2 on-chain strategy publishing layer built in-house (hook, modal, history page, DB migration; fully integrated with Base Sepolia)
 
 Lovable manages Supabase deployment. All business logic, AI architecture, and on-chain features are custom-written.
 
@@ -43,10 +43,10 @@ Lovable manages Supabase deployment. All business logic, AI architecture, and on
 | **Opportunity Discovery** | BTC, ETH, SOL trade opportunities ranked by momentum and flow signals. |
 | **Market Narrative** | Regime classification (accumulation, trending, volatile) with key drivers. |
 | **Live Charts** | Candlestick chart data per symbol. |
-| **FlowPulse Strategy Card** | Auto-generates after full market briefing: regime, allocation weights, AI reasoning, confidence. |
+| **FlowPulse Strategy Card** | Auto-generates after full market briefing: regime, allocation weights (pie chart), AI reasoning, confidence. |
 | **SoDEX Launch Workspace** | Split-screen workspace on the left: interactive TradingView spot chart, AI signals, dynamic Target/Stop levels diagram, and wallet CTAs. |
-| **Publish to Base Testnet (Wave 3)** | Hash strategy memo → MetaMask confirmation → self-send tx on Base Sepolia → Basescan link. |
-| **Strategy History (Wave 3)** | All published strategies per wallet at `/strategies`, with on-chain proof links. |
+| **Publish to Base Testnet (Wave 2)** | Hash strategy memo → MetaMask confirmation → self-send tx on Base Sepolia → Basescan link. |
+| **Strategy History (Wave 2)** | All published strategies per wallet at `/strategies`, with on-chain proof links. |
 | **Persistent Chat** | Full conversation history per wallet via Supabase RLS. |
 
 ---
@@ -68,7 +68,7 @@ All SoSoValue calls are proxied through the `sosovalue` Supabase Edge Function w
 
 ---
 
-## Wave 2 — SoDEX Panel & Chart Workspace Integration
+## Wave 2 — SoDEX Panel, Chart Workspace & Base Testnet Integration
 
 ### SoDEX Launch Panel & Interactive Workspace
 Instead of using blocked third-party iframes, Wave 2 integrates a premium **SoDEX Launch Panel & Chart Workspace** in the split-screen dashboard:
@@ -81,11 +81,15 @@ Instead of using blocked third-party iframes, Wave 2 integrates a premium **SoDE
 - **Visual Trade Setup Diagram**: Visualizes Entry, Target (with percentage gains), and Stop Loss (with percentage losses) calculated dynamically from real-time sosoValue coin prices.
 - **Action CTAs**: Safe deep-linking to SoDEX Testnet and copy order details utility.
 
----
-
-## Wave 3 (Planned Roadmap) — Base Testnet Integration
-
 ### On-Chain Strategy Publishing Flow
+Publish your AI-generated FlowPulse strategy directly to the Base Sepolia testnet:
+1. **Auto-Generation**: Run a full market briefing in the chat, and the **FlowPulse Strategy Card** automatically appears with the AI-determined regime, asset allocations, reasoning chain, and confidence score.
+2. **One-Click Publish**: Click "Publish to Base Testnet" to trigger the MetaMask wallet confirmation.
+3. **Chain Auto-Switching**: Automatically prompts to switch network to Base Sepolia (Chain ID `0x14A34`) if connected to another network.
+4. **On-Chain Cryptographic Proof**: Hashing the strategy parameters (regime, allocation weights, reasoning, and timestamp) and writing the hash to Base Sepolia creates an irrefutable, time-stamped proof of your market outlook before prices move. This eliminates hindsight bias (no backdating or modifying historical records).
+5. **Database Syncing & Registry**: The transaction hash is stored in the Supabase `strategy_records` table, automatically indexing your published strategy.
+6. **Basescan Verification**: Instantly generates a Basescan explorer link and lists the strategy under your public portfolio at `/strategies`.
+
 ```
 Full Market Briefing (narrative + decision)
         ↓
@@ -115,7 +119,7 @@ Each weight reflects the signal conviction and is transparently shown with the f
 
 ### Rationale: Why Publish to Base Testnet?
 Publishing strategies on-chain to the Base blockchain serves several key technical and business purposes:
-1. **Cryptographic Proof of Strategy**: Hashing the strategy parameters (regime, allocation weights, reasoning, and timestamp) and writing the hash to Base Sepolia creates an irrefutable, time-stamped proof of your market outlook before prices move. This eliminates hindsight bias (no backdating or modifying historical records).
+1. **Cryptographic Proof of Strategy**: Hashing the strategy parameters and writing the hash to Base Sepolia creates an irrefutable, time-stamped proof of your market outlook before prices move. This eliminates hindsight bias (no backdating or modifying historical records).
 2. **Transparent & Auditable Track Record**: It builds a public, tamper-proof registry of predictions. Anyone can audit your strategy history via Basescan or your public `/strategies` profile dashboard, establishing trust with co-investors, DAOs, or followers.
 3. **Decentralized Strategy Execution**: Registering strategy hashes on a public ledger paves the way for future smart contract integrations (non-custodial strategy automation) that can execute asset swaps on-chain (e.g., via Uniswap or SoDEX routers) directly matching your published allocations.
 
@@ -134,7 +138,7 @@ Tools run in parallel:
         ↓
 ai-chat Edge Function — Phase 2: Synthesize (data-driven analytical response)
         ↓
-Frontend renders: tool cards + FlowPulse Strategy Card + AI text
+Frontend renders: tool cards + FlowPulse Strategy Card (with Pie Chart) + AI text
         ↓
 Optional: Publish strategy hash to Base Sepolia via MetaMask
 ```
@@ -152,7 +156,7 @@ Optional: Publish strategy hash to Base Sepolia via MetaMask
 | Data | SoSoValue REST API v1/v2 |
 | Prices | Binance Public Ticker API (no key) |
 | Auth | MetaMask / EVM wallet (non-custodial) |
-| On-Chain | Base Sepolia Testnet (EIP-1193 via MetaMask; Wave 3 Roadmap) |
+| On-Chain | Base Sepolia Testnet (EIP-1193 via MetaMask; Wave 2 Integration) |
 | Charts | Recharts |
 | Database | Supabase Postgres + RLS |
 
