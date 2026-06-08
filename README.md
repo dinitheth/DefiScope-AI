@@ -185,7 +185,6 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 - *"Run a full market briefing"* → triggers FlowPulse Strategy Card
 - *"ETF flow analysis for BTC"*
 - *"Top opportunities today"*
-- *"Latest crypto news"*
 - *"Live ETH chart"*
 
 ---
