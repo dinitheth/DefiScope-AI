@@ -121,13 +121,18 @@ Instead of using blocked third-party iframes, Wave 2 integrates a premium SoDEX 
 
 ---
 
-## Wave 3 - Portfolio Indexer & Autopsy Workstation (Completed!)
+## Wave 3 - Risk Engine & Performance Autopsy (Completed!)
 
-Wave 3 introduces professional analytics and verification pages to match professional trader workstation standards:
-- [x] Strategy Indexer: Portfolio allocation construction (BTC, ETH, SOL, USDC) with 90-day backtesting simulation, Sharpe/Sortino ratios, Max Drawdown, and Daily Win Rate metrics.
-- [x] Performance Autopsy: Multi-dimensional slicing of trading history by Asset, Market Regime, and Entry Hour to calculate win rate and expectancies.
-- [x] Counterfactual Analysis: Renders counterfactual equity curve overlay to simulate gains from skipping anti-pattern leaks.
-- [x] SoDEX Rebalance Simulator: Holdings calculator with estimated swap routing on simulated orderbook.
+Wave 3 introduces an institutional-grade Risk Engine and Performance Autopsy workstation:
+- [x] Composite Risk Score (0-100): Weighted score from concentration, volatility, drawdown, correlation, and tail risk sub-components, with animated gauge and letter grades (A+ through D).
+- [x] 16 Risk Metrics: Historical VaR/CVaR (95% and 99%), Sharpe, Sortino, Calmar, Omega ratios, Ulcer Index, Max Drawdown with duration tracking, annualized return and volatility, daily win rate.
+- [x] Correlation Heatmap: 3x3 pairwise correlation matrix for BTC/ETH/SOL with contagion alert when average correlation exceeds 75%.
+- [x] Risk Contribution Analysis: Per-asset marginal risk contribution bars showing which positions drive the most portfolio risk.
+- [x] Concentration Risk Panel: HHI index, Effective N (equivalent equal-weight positions), top-asset dominance, and diversification grade.
+- [x] Scenario Simulator: Interactive "What-if" tool to stress-test the portfolio against -10% to -50% shocks on individual assets or the entire market.
+- [x] AI Risk Recommendations: Actionable severity-tagged suggestions generated dynamically from which risk sub-scores are elevated.
+- [x] Performance Autopsy: Multi-dimensional slicing of trading history by Asset, Regime, and Entry Hour with counterfactual equity curve overlay.
+- [x] SoDEX Rebalance Simulator: Holdings calculator with swap routing on simulated orderbook.
 - [x] System Diagnostics: Real-time integration check with latency indicators for SoSoValue and Binance feeds.
 
 ---
