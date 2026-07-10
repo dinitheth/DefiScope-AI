@@ -3,7 +3,7 @@
 > AI-powered on-chain finance intelligence — ask any crypto question, get live data-backed answers, and utilize the interactive SoDEX workspace panel.
 
 [![SoSoValue Buildathon 2026](https://img.shields.io/badge/SoSoValue-Buildathon%202026-blue)](https://sosovalue.com)
-[![Wave 2 Complete](https://img.shields.io/badge/Wave-2%20Complete-green)](https://github.com/dinitheth/DefiScope-AI)
+[![Wave 3 Complete](https://img.shields.io/badge/Wave-3%20Complete-green)](https://github.com/dinitheth/DefiScope-AI)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
@@ -122,14 +122,14 @@ Instead of using blocked third-party iframes, Wave 2 integrates a premium **SoDE
 
 ---
 
-## 🌊🌊 Wave 3 — Base Testnet Integration (Planned Roadmap)
+## 🌊🌊 Wave 3 — Base Testnet & Verification Suite (Completed!)
 
-Wave 3 adds **Base Testnet blockchain integration** to prove AI strategy authenticity:
-- [ ] Publish FlowPulse strategy memo hashes on Base Testnet
-- [ ] Create verifiable AI-generated strategy records
-- [ ] Link public strategy pages to on-chain proofs
-- [ ] Add wallet confirmation before publishing
-- [ ] Track strategy history over time
+Wave 3 completes **Base Testnet blockchain integration** and adds professional analytics and verification pages to match buildathon flagship standards:
+- [x] **Base Sepolia strategy publishing**: Store FlowPulse strategy memo hashes on Base Sepolia.
+- [x] **Diagnostics Page (`/diag`)**: Real-time integration check with latency indicators for SoSoValue and Binance feeds.
+- [x] **Judges Walkthrough (`/judges`)**: Reviewer script with 1-click test simulation and MetaMask guest profile simulation.
+- [x] **90-Day Strategy Backtesting**: Run live portfolio performance simulation on 90-day price history with Sharpe ratio, Sortino, Max Drawdown, and Win Rate metrics.
+- [x] **Onboarding presets**: Quick suggestion cards at the bottom of empty chats to trigger planning logic immediately.
 
 ---
 

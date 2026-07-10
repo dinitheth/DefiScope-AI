@@ -4,7 +4,7 @@ import {
   Loader2, Check, Wrench, Plus, MessageSquare, Trash2, Menu, X, ArrowUp, Wallet, LogOut, ChevronDown, RefreshCw, Bot, BarChart2, Columns2,
 } from "lucide-react";
 
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import logoSrc from "@/assets/defiscope-logo.png";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -131,6 +131,7 @@ export default function AiChat() {
   const isMobile = useIsMobile();
   const wallet = useWallet();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -140,6 +141,15 @@ export default function AiChat() {
   const [now, setNow] = useState(() => formatTime());
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-run query if query param is set (from Judges guide or suggestions)
+  useEffect(() => {
+    const q = searchParams.get("query");
+    if (q && !busy && messages.length === 0) {
+      setSearchParams({}, { replace: true });
+      send(q);
+    }
+  }, [searchParams, busy, messages, setSearchParams]);
 
 
   // Sidebar default for mobile

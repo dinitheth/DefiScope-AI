@@ -1,12 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { TrendingUp, TrendingDown, Activity, Zap, ChevronDown, ChevronUp, Loader2, ExternalLink } from "lucide-react";
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis } from "recharts";
 import PublishConfirmModal from "@/components/PublishConfirmModal";
-import SodexTradeWidget, { type SodexTradeResult } from "@/components/ai-views/SodexTradeWidget";
 import type { StrategyData } from "@/hooks/use-strategy-publisher";
 import { useSodexTrade } from "@/hooks/use-sodex-trade";
-import { toast } from "@/hooks/use-toast";
 
 interface FlowPulseStrategyCardProps {
   regime: string;
@@ -66,16 +64,19 @@ export default function FlowPulseStrategyCard({
 }: FlowPulseStrategyCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [showReasoning, setShowReasoning] = useState(true);
-  const sodex = useSodexTrade();
+  const [backtestLoading, setBacktestLoading] = useState(false);
+  const [backtestError, setBacktestError] = useState<string | null>(null);
+  const [backtestData, setBacktestData] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<{
+    sharpe: number;
+    sortino: number;
+    maxDrawdown: number;
+    winRate: number;
+    totalReturn: number;
+  } | null>(null);
 
   const regimeConfig = getRegimeConfig(regime);
   const RegimeIcon = regimeConfig.icon;
-
-  // Derive SoDEX action: prefer explicit decisionAction, fall back to regime
-  // Default to BUY for neutral/mixed regime so the Execute button always shows
-  const sodexSide: "BUY" | "SELL" = decisionAction === "SELL" ? "SELL"
-    : decisionAction === "BUY" ? "BUY"
-    : (regimeConfig.sodexSide ?? "BUY");
 
   const strategy: StrategyData = { memo, allocation, reasoning, regime, confidence };
 
@@ -86,6 +87,107 @@ export default function FlowPulseStrategyCard({
       value: pct,
       color: ASSET_COLORS[asset] ?? ASSET_COLORS.DEFAULT,
     }));
+
+  useEffect(() => {
+    let active = true;
+    async function runBacktest() {
+      setBacktestLoading(true);
+      setBacktestError(null);
+      try {
+        const assets = Object.keys(allocation).filter(a => a !== "USDC");
+        if (assets.length === 0) {
+          throw new Error("No tradeable assets in allocation");
+        }
+
+        const fetchPromises = assets.map(async (symbol) => {
+          const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=1d&limit=90`);
+          if (!res.ok) throw new Error(`Binance price fetch failed for ${symbol}`);
+          const data = await res.json();
+          return {
+            symbol,
+            prices: data.map((d: any) => ({
+              time: d[0],
+              close: parseFloat(d[4])
+            }))
+          };
+        });
+
+        const results = await Promise.all(fetchPromises);
+        if (!active) return;
+
+        const length = Math.min(...results.map(r => r.prices.length));
+        if (length < 2) {
+          throw new Error("Insufficient historical data found");
+        }
+
+        const simData: any[] = [];
+        let prevPortfolioValue = 10000;
+        let peaks = 10000;
+        let maxDD = 0;
+        const dailyReturns: number[] = [];
+        let winDays = 0;
+
+        for (let t = 1; t < length; t++) {
+          let dayReturn = 0;
+          for (const res of results) {
+            const weight = (allocation[res.symbol] ?? 0) / 100;
+            const pPrev = res.prices[t - 1].close;
+            const pCurr = res.prices[t].close;
+            const assetReturn = (pCurr - pPrev) / pPrev;
+            dayReturn += weight * assetReturn;
+          }
+
+          dailyReturns.push(dayReturn);
+          if (dayReturn > 0) winDays++;
+
+          const currentVal = prevPortfolioValue * (1 + dayReturn);
+          prevPortfolioValue = currentVal;
+
+          peaks = Math.max(peaks, currentVal);
+          const dd = (peaks - currentVal) / peaks;
+          maxDD = Math.max(maxDD, dd);
+
+          simData.push({
+            date: new Date(results[0].prices[t].time).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+            value: Math.round(currentVal),
+          });
+        }
+
+        const avgReturn = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+        const stdDev = Math.sqrt(dailyReturns.map(x => Math.pow(x - avgReturn, 2)).reduce((a, b) => a + b, 0) / dailyReturns.length);
+        const sharpe = stdDev > 0 ? (avgReturn / stdDev) * Math.sqrt(365) : 0;
+
+        const negativeDiffs = dailyReturns.filter(x => x < 0);
+        const downsideDev = negativeDiffs.length > 0
+          ? Math.sqrt(negativeDiffs.map(x => Math.pow(x, 2)).reduce((a, b) => a + b, 0) / dailyReturns.length)
+          : 0;
+        const sortino = downsideDev > 0 ? (avgReturn / downsideDev) * Math.sqrt(365) : 0;
+
+        const totalReturn = ((prevPortfolioValue - 10000) / 10000) * 100;
+        const winRate = (winDays / dailyReturns.length) * 100;
+
+        setMetrics({
+          sharpe: Math.round(sharpe * 100) / 100,
+          sortino: Math.round(sortino * 100) / 100,
+          maxDrawdown: Math.round(maxDD * 1000) / 10,
+          winRate: Math.round(winRate * 10) / 10,
+          totalReturn: Math.round(totalReturn * 10) / 10,
+        });
+
+        setBacktestData(simData);
+      } catch (err: any) {
+        console.error("Backtest calculation failed:", err);
+        setBacktestError(err.message ?? "Failed to load backtest data");
+      } finally {
+        setBacktestLoading(false);
+      }
+    }
+
+    runBacktest();
+    return () => {
+      active = false;
+    };
+  }, [allocation]);
 
   return (
     <>
@@ -212,6 +314,102 @@ export default function FlowPulseStrategyCard({
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Backtest & Risk tab/section */}
+        <div className="px-5 py-5 border-b" style={{ borderColor: C.border }}>
+          <p className="text-[11px] uppercase tracking-wider mb-3 text-left font-semibold" style={{ color: C.textMuted }}>
+            90-Day Strategy Backtest
+          </p>
+
+          {backtestLoading ? (
+            <div className="py-8 flex flex-col items-center justify-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" style={{ color: C.accent }} />
+              <p className="text-[11px]" style={{ color: C.textSecondary }}>Running historical simulations...</p>
+            </div>
+          ) : backtestError ? (
+            <div className="py-4 text-center">
+              <p className="text-[12px] font-semibold" style={{ color: C.danger }}>⚠ {backtestError}</p>
+            </div>
+          ) : metrics ? (
+            <div className="space-y-4">
+              {/* Metrics Grid */}
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { label: "Tot Return", value: `${metrics.totalReturn > 0 ? "+" : ""}${metrics.totalReturn}%`, color: metrics.totalReturn > 0 ? C.success : C.danger },
+                  { label: "Sharpe Ratio", value: metrics.sharpe, color: metrics.sharpe > 1.5 ? C.success : metrics.sharpe > 1.0 ? C.warning : C.textPrimary },
+                  { label: "Max Drawdown", value: `${metrics.maxDrawdown}%`, color: metrics.maxDrawdown < 10 ? C.success : metrics.maxDrawdown < 20 ? C.warning : C.danger },
+                  { label: "Daily Win Rate", value: `${metrics.winRate}%`, color: metrics.winRate > 50 ? C.success : C.textPrimary },
+                ].map((item) => (
+                  <div key={item.label} className="p-2 rounded-xl text-center border" style={{ background: C.surface, borderColor: C.border }}>
+                    <p className="text-[9px] uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>
+                      {item.label}
+                    </p>
+                    <p className="text-[12px] font-bold" style={{ color: item.color }}>
+                      {item.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Equity Line Chart */}
+              {backtestData.length > 0 && (
+                <div className="h-[130px] w-full mt-2 relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={backtestData}>
+                      <defs>
+                        <linearGradient id="backtestGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={C.accent} stopOpacity={0.2} />
+                          <stop offset="100%" stopColor={C.accent} stopOpacity={0.0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fontSize: 8, fill: C.textMuted }}
+                        axisLine={false}
+                        tickLine={false}
+                        interval={Math.round(backtestData.length / 4)}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 8, fill: C.textMuted }}
+                        axisLine={false}
+                        tickLine={false}
+                        domain={["dataMin - 100", "dataMax + 100"]}
+                        width={30}
+                      />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            const data = payload[0].payload;
+                            return (
+                              <div
+                                className="px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold"
+                                style={{ background: C.surface, borderColor: C.border, color: C.textPrimary }}
+                              >
+                                {data.date}: ${data.value.toLocaleString()}
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="value"
+                        stroke={C.accent}
+                        strokeWidth={1.5}
+                        fill="url(#backtestGradient)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              <p className="text-[10px] leading-relaxed" style={{ color: C.textMuted }}>
+                Simulated 90-day backtest of this portfolio allocation starting at $10,000, assuming daily rebalancing. Prices retrieved live from Binance public Klines.
+              </p>
+            </div>
+          ) : null}
         </div>
 
         {/* Memo */}
