@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { TrendingUp, TrendingDown, Activity, Zap, ChevronDown, ChevronUp, Loader2, ExternalLink } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis } from "recharts";
-import PublishConfirmModal from "@/components/PublishConfirmModal";
-import type { StrategyData } from "@/hooks/use-strategy-publisher";
 import { useSodexTrade } from "@/hooks/use-sodex-trade";
 
 interface FlowPulseStrategyCardProps {
@@ -62,7 +60,6 @@ export default function FlowPulseStrategyCard({
   ownerKey,
   decisionAction,
 }: FlowPulseStrategyCardProps) {
-  const [modalOpen, setModalOpen] = useState(false);
   const [showReasoning, setShowReasoning] = useState(true);
   const [backtestLoading, setBacktestLoading] = useState(false);
   const [backtestError, setBacktestError] = useState<string | null>(null);
@@ -78,7 +75,7 @@ export default function FlowPulseStrategyCard({
   const regimeConfig = getRegimeConfig(regime);
   const RegimeIcon = regimeConfig.icon;
 
-  const strategy: StrategyData = { memo, allocation, reasoning, regime, confidence };
+
 
   const chartData = Object.entries(allocation)
     .filter(([, pct]) => pct > 0)
@@ -458,30 +455,7 @@ export default function FlowPulseStrategyCard({
           </div>
         )}
 
-        {/* Publish to Base Sepolia Testnet CTA */}
-        <div className="px-5 py-4" style={{ background: "rgba(0, 0, 0, 0.15)" }}>
-          <button
-            onClick={() => setModalOpen(true)}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-bold transition-all active:scale-[0.99] border hover:opacity-95"
-            style={{
-              background: C.accent,
-              borderColor: C.accent,
-              color: "#FFFFFF",
-              boxShadow: `0 4px 12px ${C.accent}30`
-            }}
-          >
-            <Zap size={14} fill="#FFFFFF" />
-            Publish to Base Testnet
-          </button>
-        </div>
       </motion.div>
-
-      <PublishConfirmModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        strategy={strategy}
-        ownerKey={ownerKey || ""}
-      />
     </>
   );
 }

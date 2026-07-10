@@ -148,7 +148,7 @@ export default function SodexLaunchPanel({
   const assetColor = ASSET_COLORS[activeAsset] ?? ASSET_COLORS.DEFAULT;
   const sideColor = side === "BUY" ? C.success : C.danger;
 
-  // ─── INDEXER LOGIC (Mosaic Style) ──────────────────────────────────────────
+  // ─── INDEXER LOGIC ──────────────────────────────────────────
   // Calculate simulated historical stress tests based on active allocation
   const stressTests = {
     covid: ((currentAllocation.BTC * -35 + currentAllocation.ETH * -42 + currentAllocation.SOL * -55) / 100).toFixed(1),
@@ -209,7 +209,7 @@ export default function SodexLaunchPanel({
     }, 2000);
   };
 
-  // ─── AUTOPSY LOGIC (Edgework Style) ─────────────────────────────────────────
+  // ─── AUTOPSY LOGIC ─────────────────────────────────────────
   // Filter closed trades based on user selectors
   const filteredTrades = MOCK_TRADES.filter((t) => {
     if (filterAsset !== "ALL" && t.asset !== filterAsset) return false;
@@ -284,8 +284,8 @@ export default function SodexLaunchPanel({
       {/* Workspace Hub Header tabs */}
       <div className="flex border-b sticky top-0 z-15" style={{ background: C.panel, borderColor: C.border }}>
         {[
-          { id: "indexer", label: "Indexer (Mosaic)", icon: Sliders },
-          { id: "autopsy", label: "Autopsy (Edgework)", icon: Award },
+          { id: "indexer", label: "Indexer", icon: Sliders },
+          { id: "autopsy", label: "Autopsy", icon: Award },
           { id: "chart", label: "Live Chart", icon: BarChart },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -313,7 +313,7 @@ export default function SodexLaunchPanel({
 
       {/* Workspace Content Panels */}
       <div className="flex-1 px-6 py-6 space-y-5">
-        {/* ─── TAB 1: INDEXER (Mosaic Style) ───────────────────────────────── */}
+        {/* ─── TAB 1: INDEXER ───────────────────────────────── */}
         {activeTab === "indexer" && (
           <div className="space-y-4 animate-fade-in-up">
             {/* Allocation donut visualization */}
@@ -458,7 +458,7 @@ export default function SodexLaunchPanel({
           </div>
         )}
 
-        {/* ─── TAB 2: AUTOPSY (Edgework Style) ──────────────────────────────── */}
+        {/* ─── TAB 2: AUTOPSY ──────────────────────────────── */}
         {activeTab === "autopsy" && (
           <div className="space-y-4 animate-fade-in-up">
             {/* PNL Slicers */}

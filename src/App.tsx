@@ -8,7 +8,6 @@ import Dashboard from "./pages/Dashboard";
 import HowToUse from "./pages/HowToUse";
 import StrategyHistory from "./pages/StrategyHistory";
 import Diag from "./pages/Diag";
-import Judges from "./pages/Judges";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -25,7 +24,6 @@ const App = () => (
           <Route path="/how-to-use" element={<HowToUse />} />
           <Route path="/strategies" element={<StrategyHistory />} />
           <Route path="/diag" element={<Diag />} />
-          <Route path="/judges" element={<Judges />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
