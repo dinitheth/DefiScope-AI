@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import TradingViewWidget from "./TradingViewWidget";
 import { fetchCoinList } from "@/lib/sosovalue-api";
+import { supabase } from "@/integrations/supabase/client";
 import { useWallet, getAllowedProvider } from "@/hooks/use-wallet";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -216,6 +217,7 @@ export default function SodexLaunchPanel({
   const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null);
   const [scenarioShock, setScenarioShock] = useState("-20");
   const [scenarioAsset, setScenarioAsset] = useState("ALL");
+  const [dbTrades, setDbTrades] = useState<ClosedPosition[]>([]);
 
   // Rebalancer state
   const [holdings, setHoldings] = useState({ BTC: "0.2", ETH: "1.5", SOL: "15.0" });
@@ -330,6 +332,46 @@ export default function SodexLaunchPanel({
     }
   }, [activeAddress]);
 
+  // Fetch real positions/trades from Supabase for activeAddress if available
+  useEffect(() => {
+    if (activeAddress && activeAddress.startsWith("0x")) {
+      supabase.from("positions" as any)
+        .select("*")
+        .then(({ data: posData }) => {
+          if (posData && posData.length > 0) {
+            const mapped: ClosedPosition[] = posData.map((p: any) => {
+              const entry = p.entry_price || 3000;
+              const pnl = p.pnl_usd || 0;
+              const size = p.size || 1;
+              const exit = entry + pnl / size;
+              const dateObj = new Date(p.opened_at || Date.now());
+              return {
+                id: p.id,
+                asset: (p.asset || "ETH").toUpperCase() as any,
+                side: (p.side || "BUY").toUpperCase() as any,
+                entryPrice: Math.round(entry),
+                exitPrice: Math.round(exit),
+                amount: size,
+                pnl: Math.round(pnl),
+                regime: pnl >= 0 ? "bullish" : "bearish",
+                hour: dateObj.getHours(),
+                date: dateObj.toLocaleDateString([], { month: "short", day: "numeric" }),
+              };
+            });
+            setDbTrades(mapped);
+          } else {
+            setDbTrades([]);
+          }
+        })
+        .catch((err) => {
+          console.warn("Failed to fetch database positions:", err);
+          setDbTrades([]);
+        });
+    } else {
+      setDbTrades([]);
+    }
+  }, [activeAddress]);
+
   // ─── Scenario simulation ───────────────────────────────────────────────
   const runScenario = () => {
     const portfolioReturns = computePortfolioReturns(dailyReturns, currentAllocation);
@@ -398,7 +440,7 @@ export default function SodexLaunchPanel({
   };
 
   // ─── Autopsy calculations ──────────────────────────────────────────────
-  const trades = getDeterministicTrades(activeAddress);
+  const trades = dbTrades.length > 0 ? dbTrades : getDeterministicTrades(activeAddress);
   
   const filteredTrades = trades.filter((t) => {
     if (filterAsset !== "ALL" && t.asset !== filterAsset) return false;
