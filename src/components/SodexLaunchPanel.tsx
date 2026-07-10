@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import TradingViewWidget from "./TradingViewWidget";
 import { fetchCoinList } from "@/lib/sosovalue-api";
-import { useWallet } from "@/hooks/use-wallet";
+import { useWallet, getAllowedProvider } from "@/hooks/use-wallet";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
   PieChart, Pie, Cell
@@ -305,6 +305,31 @@ export default function SodexLaunchPanel({
 
   useEffect(() => { runRiskEngine(); }, [runRiskEngine]);
 
+  // Fetch native on-chain balance from MetaMask / wallet provider when activeAddress changes
+  useEffect(() => {
+    if (activeAddress && activeAddress.startsWith("0x") && typeof window !== "undefined") {
+      const ethereum = getAllowedProvider();
+      if (ethereum && typeof ethereum.request === "function") {
+        ethereum.request({
+          method: "eth_getBalance",
+          params: [activeAddress, "latest"]
+        })
+        .then((balanceHex: any) => {
+          if (balanceHex && typeof balanceHex === "string") {
+            const ethBalance = parseInt(balanceHex, 16) / 1e18;
+            setHoldings((prev) => ({
+              ...prev,
+              ETH: ethBalance.toFixed(4),
+            }));
+          }
+        })
+        .catch((err: any) => {
+          console.warn("Failed to fetch native ETH balance:", err);
+        });
+      }
+    }
+  }, [activeAddress]);
+
   // ─── Scenario simulation ───────────────────────────────────────────────
   const runScenario = () => {
     const portfolioReturns = computePortfolioReturns(dailyReturns, currentAllocation);
@@ -440,14 +465,13 @@ export default function SodexLaunchPanel({
         {([
           { id: "risk", label: "Risk Engine", icon: Gauge },
           { id: "autopsy", label: "Autopsy", icon: Award },
-          { id: "chart", label: "Live Chart", icon: BarChart },
         ] as const).map((tab) => {
           const Icon = tab.icon;
           const active = activeTab === tab.id;
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => setActiveTab(tab.id as any)}
               className="flex-1 py-3.5 flex items-center justify-center gap-2 text-xs font-bold transition-all relative border-r last:border-r-0"
               style={{ borderColor: C.border, color: active ? C.accent : C.textSecondary, background: active ? "rgba(255,255,255,0.02)" : "transparent" }}
             >
@@ -996,54 +1020,6 @@ export default function SodexLaunchPanel({
           </div>
         )}
 
-        {/* ═══ TAB: LIVE CHART ═══════════════════════════════════════════ */}
-        {activeTab === "chart" && (
-          <div className="space-y-4 animate-fade-in-up">
-            <div className="flex items-center justify-between p-4 rounded-2xl border" style={{ background: C.panel, borderColor: C.border }}>
-              <div className="flex items-center gap-2.5">
-                <BarChart2 size={15} style={{ color: C.accent }} />
-                <p className="text-[12px] font-bold text-white">Select Asset</p>
-              </div>
-              <select value={activeAsset} onChange={(e) => setActiveAsset(e.target.value)}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#141414] border-[#1C1C1C] text-white focus:outline-none cursor-pointer">
-                {["BTC", "ETH", "SOL"].map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </div>
-
-            <div className="rounded-2xl overflow-hidden border" style={{ background: C.panel, borderColor: C.border }}>
-              <div className="px-4 py-3 border-b flex items-center justify-between" style={{ background: C.surface, borderColor: C.border }}>
-                <p className="text-[11px] font-bold uppercase tracking-wider">{activeAsset}/USDT Live Spot Chart</p>
-                <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold" style={{ background: `${C.accent}20`, color: C.accent }}>TradingView</span>
-              </div>
-              <div className="w-full bg-[#0D0E12]" style={{ height: "300px" }}>
-                <TradingViewWidget symbol={tvSymbol} height={300} />
-              </div>
-            </div>
-
-            {signals && (
-              <div className="rounded-2xl p-4 space-y-3 border" style={{ background: C.panel, borderColor: C.border }}>
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>AI Market Signals</p>
-                  <span className="text-[10px] px-2 py-0.5 rounded font-bold" style={{ background: `${C.success}20`, color: C.success }}>AI Verified</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["momentum", "institutional", "sentiment"] as const).map((key) => {
-                    const val = (signals[key] || "neutral").toLowerCase();
-                    const isBull = val === "bullish" || val === "bull";
-                    const isBear = val === "bearish" || val === "bear";
-                    const color = isBull ? C.success : isBear ? C.danger : C.textSecondary;
-                    return (
-                      <div key={key} className="p-2.5 rounded-xl border text-center" style={{ background: isBull ? `${C.success}10` : isBear ? `${C.danger}10` : C.surface, borderColor: isBull ? `${C.success}20` : isBear ? `${C.danger}20` : C.border }}>
-                        <p className="text-[9px] uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>{key}</p>
-                        <p className="text-[11px] font-bold capitalize" style={{ color }}>{signals[key]}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Footer */}
