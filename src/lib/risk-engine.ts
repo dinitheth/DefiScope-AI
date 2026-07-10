@@ -814,24 +814,62 @@ export function getDeterministicPortfolio(address: string): Record<string, numbe
 
 export async function fetchWalletHistoryFromScan(address: string): Promise<ClosedPosition[]> {
   try {
-    const mainnetUrl = `https://api.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=30&sort=desc`;
-    const basescanUrl = `https://api.basescan.org/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=30&sort=desc`;
+    const mainnetUrl = `https://mainnet-gw.sodex.dev/api/v1/perps/accounts/${address}/positions/history?limit=100`;
+    const testnetUrl = `https://testnet-gw.sodex.dev/api/v1/perps/accounts/${address}/positions/history?limit=100`;
 
-    const [mainnetRes, basescanRes] = await Promise.all([
+    const [mainnetRes, testnetRes] = await Promise.all([
       fetch(mainnetUrl).then(r => r.json()).catch(() => null),
-      fetch(basescanUrl).then(r => r.json()).catch(() => null)
+      fetch(testnetUrl).then(r => r.json()).catch(() => null)
+    ]);
+
+    const rawPositions: any[] = [];
+    if (mainnetRes && mainnetRes.code === 0 && Array.isArray(mainnetRes.data)) {
+      rawPositions.push(...mainnetRes.data);
+    }
+    if (testnetRes && testnetRes.code === 0 && Array.isArray(testnetRes.data)) {
+      rawPositions.push(...testnetRes.data);
+    }
+
+    if (rawPositions.length > 0) {
+      const sorted = rawPositions
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        .slice(0, 50);
+
+      return sorted.map((p: any, idx: number) => {
+        const symbolStr = p.symbol || "BTC-USD";
+        const asset = symbolStr.split("-")[0].toUpperCase() as "BTC" | "ETH" | "SOL";
+        const side = p.side === "LONG" || p.positionSide === "LONG" ? "BUY" : "SELL";
+        const dateObj = new Date(p.createdAt || Date.now());
+        
+        return {
+          id: p.id || String(p.createdAt || idx),
+          asset: (["BTC", "ETH", "SOL"].includes(asset) ? asset : "BTC") as any,
+          side,
+          entryPrice: parseFloat(p.avgEntryPrice || p.entryPrice || 0),
+          exitPrice: parseFloat(p.avgClosePrice || p.closePrice || 0),
+          amount: parseFloat(p.size || 0),
+          pnl: Math.round(parseFloat(p.realizedPnL || p.pnl || 0)),
+          regime: (parseFloat(p.realizedPnL || 0) >= 0) ? "bullish" : "bearish",
+          hour: dateObj.getHours(),
+          date: dateObj.toLocaleDateString([], { month: "short", day: "numeric" }),
+        };
+      });
+    }
+
+    // 3. Fallback to normal blockchain scanners if SoDEX is empty
+    const bsUrl = `https://api.basescan.org/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=30&sort=desc`;
+    const esUrl = `https://api.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=30&sort=desc`;
+
+    const [esRes, bsRes] = await Promise.all([
+      fetch(esUrl).then(r => r.json()).catch(() => null),
+      fetch(bsUrl).then(r => r.json()).catch(() => null)
     ]);
 
     const txs: any[] = [];
-    if (basescanRes?.status === "1" && Array.isArray(basescanRes.result)) {
-      txs.push(...basescanRes.result);
-    }
-    if (mainnetRes?.status === "1" && Array.isArray(mainnetRes.result)) {
-      txs.push(...mainnetRes.result);
-    }
+    if (bsRes?.status === "1" && Array.isArray(bsRes.result)) txs.push(...bsRes.result);
+    if (esRes?.status === "1" && Array.isArray(esRes.result)) txs.push(...esRes.result);
 
     if (txs.length > 0) {
-      // Sort mixed txs descending by timestamp
       const sortedTxs = txs
         .sort((a, b) => (parseInt(b.timeStamp) || 0) - (parseInt(a.timeStamp) || 0))
         .slice(0, 30);
@@ -874,7 +912,7 @@ export async function fetchWalletHistoryFromScan(address: string): Promise<Close
       });
     }
   } catch (err) {
-    console.warn("Error fetching wallet history from block explorers:", err);
+    console.warn("Error fetching wallet history from APIs:", err);
   }
   return [];
 }
