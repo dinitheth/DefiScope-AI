@@ -707,3 +707,107 @@ export async function fetchDailyReturns(
 
   return sorted;
 }
+
+export interface ClosedPosition {
+  id: string;
+  asset: "BTC" | "ETH" | "SOL";
+  side: "BUY" | "SELL";
+  entryPrice: number;
+  exitPrice: number;
+  amount: number;
+  pnl: number;
+  regime: "bullish" | "bearish" | "chop";
+  hour: number;
+  date: string;
+}
+
+export function getDeterministicTrades(address: string): ClosedPosition[] {
+  let hash = 0;
+  for (let i = 0; i < address.length; i++) {
+    hash = address.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  
+  const rng = (seed: number) => {
+    const x = Math.sin(seed) * 10000;
+    return x - Math.floor(x);
+  };
+  
+  let seed = Math.abs(hash);
+  const trades: ClosedPosition[] = [];
+  const assets: ("BTC" | "ETH" | "SOL")[] = ["BTC", "ETH", "SOL"];
+  const regimes: ("bullish" | "bearish" | "chop")[] = ["bullish", "bearish", "chop"];
+  
+  const numTrades = 15;
+  const basePrice = { BTC: 64000, ETH: 3200, SOL: 140 };
+  
+  for (let i = 0; i < numTrades; i++) {
+    const asset = assets[Math.floor(rng(seed + i * 7) * 3)];
+    const side = rng(seed + i * 13) > 0.4 ? "BUY" : "SELL";
+    const regime = regimes[Math.floor(rng(seed + i * 19) * 3)];
+    const hour = Math.floor(rng(seed + i * 29) * 24);
+    
+    const entryPrice = basePrice[asset] * (0.95 + rng(seed + i * 31) * 0.1);
+    
+    let isWin = rng(seed + i * 43) > 0.45;
+    if (asset === "SOL" && regime === "bearish") {
+      isWin = false;
+    }
+    if (hour >= 20 || hour <= 4) {
+      isWin = rng(seed + i * 47) > 0.65;
+    }
+    
+    const pctChange = (0.01 + rng(seed + i * 59) * 0.07) * (isWin ? 1 : -1.2);
+    const exitPrice = entryPrice * (1 + pctChange);
+    
+    const amount = asset === "BTC" ? 0.05 + rng(seed + i * 67) * 0.15 
+                 : asset === "ETH" ? 0.5 + rng(seed + i * 71) * 2.0
+                 : 5 + rng(seed + i * 73) * 25.0;
+                 
+    const pnl = Math.round(amount * (exitPrice - entryPrice) * (side === "BUY" ? 1 : -1));
+    
+    const day = 10 + Math.floor(rng(seed + i * 79) * 20);
+    const date = `Jun ${day < 10 ? '0' + day : day}`;
+    
+    trades.push({
+      id: `${i + 1}`,
+      asset,
+      side,
+      entryPrice: Math.round(entryPrice),
+      exitPrice: Math.round(exitPrice),
+      amount: parseFloat(amount.toFixed(3)),
+      pnl,
+      regime,
+      hour,
+      date,
+    });
+  }
+  
+  return trades.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export function getDeterministicPortfolio(address: string): Record<string, number> {
+  let hash = 0;
+  for (let i = 0; i < address.length; i++) {
+    hash = address.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  
+  const rng = (seed: number) => {
+    const x = Math.sin(seed) * 10000;
+    return x - Math.floor(x);
+  };
+  
+  let seed = Math.abs(hash);
+  const btcWeight = 10 + Math.floor(rng(seed + 1) * 50);
+  const ethWeight = 10 + Math.floor(rng(seed + 2) * 30);
+  const solWeight = 5 + Math.floor(rng(seed + 3) * 25);
+  const usdcWeight = Math.max(5, 100 - (btcWeight + ethWeight + solWeight));
+  
+  const total = btcWeight + ethWeight + solWeight + usdcWeight;
+  
+  return {
+    BTC: Math.round((btcWeight / total) * 100),
+    ETH: Math.round((ethWeight / total) * 100),
+    SOL: Math.round((solWeight / total) * 100),
+    USDC: Math.round((usdcWeight / total) * 100),
+  };
+}

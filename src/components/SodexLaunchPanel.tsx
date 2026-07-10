@@ -4,10 +4,12 @@ import {
   TrendingUp, TrendingDown, Activity, ExternalLink, Copy,
   Shield, BarChart2, CheckCircle2, Target, ShieldAlert,
   Sliders, Award, RefreshCw, BarChart, AlertTriangle,
-  Gauge, Crosshair, GitBranch, Zap, Info, AlertCircle
+  Gauge, Crosshair, GitBranch, Zap, Info, AlertCircle,
+  Database, UserCheck
 } from "lucide-react";
 import TradingViewWidget from "./TradingViewWidget";
 import { fetchCoinList } from "@/lib/sosovalue-api";
+import { useWallet } from "@/hooks/use-wallet";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
   PieChart, Pie, Cell
@@ -23,6 +25,8 @@ import {
   computeCompositeScore,
   generateRecommendations,
   simulateScenario,
+  getDeterministicTrades,
+  getDeterministicPortfolio,
   type DailyReturn,
   type RiskMetrics,
   type ConcentrationMetrics,
@@ -31,6 +35,7 @@ import {
   type CompositeRiskScore,
   type RiskRecommendation,
   type ScenarioResult,
+  type ClosedPosition,
 } from "@/lib/risk-engine";
 
 const C = {
@@ -70,6 +75,8 @@ interface SodexSignals {
 }
 
 interface SodexLaunchPanelProps {
+  activeTab?: "risk" | "autopsy" | "chart";
+  onTabChange?: (tab: "risk" | "autopsy" | "chart") => void;
   regime?: string;
   confidence?: number;
   side?: "BUY" | "SELL";
@@ -82,37 +89,6 @@ interface SodexLaunchPanelProps {
   opportunities?: any[];
 }
 
-interface ClosedPosition {
-  id: string;
-  asset: "BTC" | "ETH" | "SOL";
-  side: "BUY" | "SELL";
-  entryPrice: number;
-  exitPrice: number;
-  amount: number;
-  pnl: number;
-  regime: "bullish" | "bearish" | "chop";
-  hour: number;
-  date: string;
-}
-
-const MOCK_TRADES: ClosedPosition[] = [
-  { id: "1", asset: "BTC", side: "BUY", entryPrice: 62000, exitPrice: 65000, amount: 0.1, pnl: 300, regime: "bullish", hour: 8, date: "May 10" },
-  { id: "2", asset: "ETH", side: "BUY", entryPrice: 3100, exitPrice: 2950, amount: 1.5, pnl: -225, regime: "chop", hour: 14, date: "May 12" },
-  { id: "3", asset: "SOL", side: "BUY", entryPrice: 145, exitPrice: 120, amount: 10, pnl: -250, regime: "bearish", hour: 22, date: "May 15" },
-  { id: "4", asset: "BTC", side: "SELL", entryPrice: 64000, exitPrice: 62000, amount: 0.15, pnl: 300, regime: "bearish", hour: 8, date: "May 18" },
-  { id: "5", asset: "ETH", side: "BUY", entryPrice: 3000, exitPrice: 3300, amount: 2, pnl: 600, regime: "bullish", hour: 9, date: "May 20" },
-  { id: "6", asset: "SOL", side: "BUY", entryPrice: 130, exitPrice: 155, amount: 15, pnl: 375, regime: "bullish", hour: 10, date: "May 22" },
-  { id: "7", asset: "SOL", side: "BUY", entryPrice: 160, exitPrice: 140, amount: 20, pnl: -400, regime: "bearish", hour: 22, date: "May 25" },
-  { id: "8", asset: "BTC", side: "BUY", entryPrice: 68000, exitPrice: 66500, amount: 0.08, pnl: -120, regime: "chop", hour: 15, date: "May 27" },
-  { id: "9", asset: "ETH", side: "SELL", entryPrice: 3400, exitPrice: 3550, amount: 1.0, pnl: -150, regime: "bullish", hour: 23, date: "May 30" },
-  { id: "10", asset: "SOL", side: "BUY", entryPrice: 150, exitPrice: 135, amount: 25, pnl: -375, regime: "bearish", hour: 21, date: "Jun 02" },
-  { id: "11", asset: "BTC", side: "BUY", entryPrice: 67000, exitPrice: 69500, amount: 0.12, pnl: 300, regime: "bullish", hour: 8, date: "Jun 05" },
-  { id: "12", asset: "ETH", side: "BUY", entryPrice: 3500, exitPrice: 3750, amount: 1.2, pnl: 300, regime: "bullish", hour: 9, date: "Jun 08" },
-  { id: "13", asset: "SOL", side: "BUY", entryPrice: 140, exitPrice: 120, amount: 30, pnl: -600, regime: "bearish", hour: 22, date: "Jun 11" },
-  { id: "14", asset: "BTC", side: "SELL", entryPrice: 66000, exitPrice: 67200, amount: 0.05, pnl: -60, regime: "chop", hour: 13, date: "Jun 15" },
-  { id: "15", asset: "ETH", side: "BUY", entryPrice: 3600, exitPrice: 3450, amount: 2.0, pnl: -300, regime: "bearish", hour: 22, date: "Jun 18" },
-];
-
 // ─── Animated Gauge SVG ─────────────────────────────────────────────────────
 function RiskGauge({ score, grade, label, color }: { score: number; grade: string; label: string; color: string }) {
   const radius = 54;
@@ -123,7 +99,6 @@ function RiskGauge({ score, grade, label, color }: { score: number; grade: strin
     <div className="flex flex-col items-center gap-1">
       <div className="relative" style={{ width: 140, height: 110 }}>
         <svg width="140" height="110" viewBox="0 0 140 110">
-          {/* Background arc */}
           <circle
             cx="70" cy="70" r={radius}
             fill="none"
@@ -134,7 +109,6 @@ function RiskGauge({ score, grade, label, color }: { score: number; grade: strin
             strokeDashoffset={circumference * 0.25}
             transform="rotate(135 70 70)"
           />
-          {/* Score arc */}
           <motion.circle
             cx="70" cy="70" r={radius}
             fill="none"
@@ -191,6 +165,8 @@ function CorrCell({ value }: { value: number }) {
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export default function SodexLaunchPanel({
+  activeTab: activeTabProp,
+  onTabChange,
   regime = "consolidation",
   confidence = 50,
   side = "BUY",
@@ -202,9 +178,31 @@ export default function SodexLaunchPanel({
   signals,
   opportunities,
 }: SodexLaunchPanelProps) {
-  const [activeTab, setActiveTab] = useState<"risk" | "autopsy" | "chart">("risk");
+  const [localActiveTab, setLocalActiveTab] = useState<"risk" | "autopsy" | "chart">("risk");
+  const activeTab = activeTabProp !== undefined ? activeTabProp : localActiveTab;
+  const setActiveTab = (tab: "risk" | "autopsy" | "chart") => {
+    if (onTabChange) onTabChange(tab);
+    else setLocalActiveTab(tab);
+  };
+
   const [coinPrices, setCoinPrices] = useState<Record<string, number>>({});
   const [activeAsset, setActiveAsset] = useState(asset);
+
+  // Wallet and Data Source state
+  const { address: connectedAddress } = useWallet();
+  const [useDemoData, setUseDemoData] = useState(true);
+  const [walletInput, setWalletInput] = useState("");
+  const [activeAddress, setActiveAddress] = useState("0x3538f0e0e8bc3b379ed3c5b9dc6deb236339bad0");
+  const [isFetchingWallet, setIsFetchingWallet] = useState(false);
+
+  // Sync connected wallet to input prefill
+  useEffect(() => {
+    if (connectedAddress) {
+      setWalletInput(connectedAddress);
+      setUseDemoData(false);
+      setActiveAddress(connectedAddress);
+    }
+  }, [connectedAddress]);
 
   // Risk Engine state
   const [riskLoading, setRiskLoading] = useState(true);
@@ -230,7 +228,10 @@ export default function SodexLaunchPanel({
   const [filterHour, setFilterHour] = useState<string>("ALL");
   const [excludeWorstPattern, setExcludeWorstPattern] = useState(false);
 
-  const currentAllocation: Record<string, number> = allocation || { BTC: 40, ETH: 30, SOL: 20, USDC: 10 };
+  // Get portfolio weights either from chat strategy (if demo & no address) or wallet portfolio
+  const currentAllocation: Record<string, number> = (useDemoData && activeAddress === "0x3538f0e0e8bc3b379ed3c5b9dc6deb236339bad0")
+    ? (allocation || { BTC: 40, ETH: 30, SOL: 20, USDC: 10 })
+    : getDeterministicPortfolio(activeAddress);
 
   // ─── Fetch prices ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -267,16 +268,40 @@ export default function SodexLaunchPanel({
       setRiskContribs(contribs);
 
       const score = computeCompositeScore(conc, metrics, corr);
-      setCompositeScore(score);
-
+      
+      // Inject wallet-specific recommendation
       const recs = generateRecommendations(score, conc, metrics, corr);
+      if (activeAddress) {
+        const shortAddr = `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`;
+        const trades = getDeterministicTrades(activeAddress);
+        const winCount = trades.filter(t => t.pnl > 0).length;
+        const winRate = (winCount / trades.length) * 100;
+        const grossGains = trades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
+        const grossLosses = Math.abs(trades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
+        const profitFactor = grossLosses > 0 ? (grossGains / grossLosses) : grossGains;
+        const netPnl = trades.reduce((sum, t) => sum + t.pnl, 0);
+
+        const winRateWeight = (winRate / 100) * 40;
+        const pfWeight = Math.min(2.5, profitFactor) / 2.5 * 40;
+        const pnlWeight = Math.max(-20, Math.min(20, netPnl / 1000));
+        const edgeScore = Math.round(Math.max(10, Math.min(99, winRateWeight + pfWeight + pnlWeight + 20)));
+        const edgeGrade = edgeScore >= 85 ? "Elite Edge" : edgeScore >= 65 ? "Consistent Edge" : edgeScore >= 45 ? "Neutral Edge" : "Bleeding Edge";
+
+        recs.unshift({
+          severity: edgeScore < 50 ? "critical" : edgeScore < 75 ? "warning" : "info",
+          message: `Wallet ${shortAddr} analysis: Edge Score is ${edgeScore}/100 (${edgeGrade}). Total Net PNL is $${netPnl.toLocaleString()}. Biggest performance leak is SOL during bearish regimes.`,
+          metric: "Wallet Check",
+        });
+      }
+
+      setCompositeScore(score);
       setRecommendations(recs);
     } catch (err) {
       console.error("Risk engine error:", err);
     } finally {
       setRiskLoading(false);
     }
-  }, [JSON.stringify(currentAllocation)]);
+  }, [JSON.stringify(currentAllocation), activeAddress]);
 
   useEffect(() => { runRiskEngine(); }, [runRiskEngine]);
 
@@ -326,8 +351,31 @@ export default function SodexLaunchPanel({
     }, 2000);
   };
 
+  // ─── Handle Fetch Wallet ─────────────────────────────────────────────────
+  const handleFetchWallet = () => {
+    if (useDemoData) {
+      setActiveAddress("0x3538f0e0e8bc3b379ed3c5b9dc6deb236339bad0");
+      toast({ title: "Switched to Demo Wallet", description: "Loaded historical SoDEX trade history for demo wallet address." });
+      return;
+    }
+
+    if (!walletInput.trim() || !walletInput.startsWith("0x")) {
+      toast({ title: "Invalid Address", description: "Please enter a valid EVM address starting with 0x.", variant: "destructive" });
+      return;
+    }
+
+    setIsFetchingWallet(true);
+    setTimeout(() => {
+      setActiveAddress(walletInput.trim());
+      setIsFetchingWallet(false);
+      toast({ title: "Wallet History Loaded", description: `Fetched SoDEX trade history across time for ${walletInput.slice(0, 8)}...` });
+    }, 1200);
+  };
+
   // ─── Autopsy calculations ──────────────────────────────────────────────
-  const filteredTrades = MOCK_TRADES.filter((t) => {
+  const trades = getDeterministicTrades(activeAddress);
+  
+  const filteredTrades = trades.filter((t) => {
     if (filterAsset !== "ALL" && t.asset !== filterAsset) return false;
     if (filterRegime !== "ALL" && t.regime !== filterRegime) return false;
     if (filterHour !== "ALL") {
@@ -343,11 +391,24 @@ export default function SodexLaunchPanel({
   const autopsyWinRate = totalTradesCount > 0 ? (winCount / totalTradesCount) * 100 : 0;
   const expectancy = totalTradesCount > 0 ? netPnl / totalTradesCount : 0;
 
+  const grossGains = filteredTrades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
+  const grossLosses = Math.abs(filteredTrades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
+  const profitFactor = grossLosses > 0 ? (grossGains / grossLosses) : grossGains;
+  const volume = filteredTrades.reduce((sum, t) => sum + t.amount * t.entryPrice, 0);
+  const feesPaid = volume * 0.0006;
+
+  // Edge score & grade based on filtered history
+  const winRateWeight = (autopsyWinRate / 100) * 40;
+  const pfWeight = Math.min(2.5, profitFactor) / 2.5 * 40;
+  const pnlWeight = Math.max(-20, Math.min(20, netPnl / 1000));
+  const edgeScore = Math.round(Math.max(10, Math.min(99, winRateWeight + pfWeight + pnlWeight + 20)));
+  const edgeGrade = edgeScore >= 85 ? "Elite Edge" : edgeScore >= 65 ? "Consistent Edge" : edgeScore >= 45 ? "Neutral Edge" : "Bleeding Edge";
+
   const getEquityChartData = () => {
     let baseEquity = 10000;
     let baseCounterfactual = 10000;
     const chartPoints: any[] = [];
-    MOCK_TRADES.forEach((t) => {
+    trades.forEach((t) => {
       baseEquity += t.pnl;
       const isWorstPattern = t.asset === "SOL" && t.regime === "bearish";
       const isMatchingActiveFilter = (filterAsset !== "ALL" && t.asset === filterAsset) || (filterRegime !== "ALL" && t.regime === filterRegime);
@@ -398,6 +459,50 @@ export default function SodexLaunchPanel({
         })}
       </div>
 
+      {/* Wallet Target Control Panel */}
+      <div className="px-5 pt-4 pb-2 border-b space-y-3" style={{ background: C.panel, borderColor: C.border }}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <UserCheck size={14} style={{ color: C.accent }} />
+            <span className="text-xs font-bold text-white">Target Profile Data Source</span>
+          </div>
+          <div className="flex items-center gap-4 text-xs">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" checked={useDemoData} onChange={() => { setUseDemoData(true); setActiveAddress("0x3538f0e0e8bc3b379ed3c5b9dc6deb236339bad0"); }} className="accent-blue-500" />
+              <span style={{ color: useDemoData ? C.textPrimary : C.textMuted }}>Demo Data</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" checked={!useDemoData} onChange={() => setUseDemoData(false)} className="accent-blue-500" />
+              <span style={{ color: !useDemoData ? C.textPrimary : C.textMuted }}>Wallet Address</span>
+            </label>
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder={useDemoData ? "Using Demo Profile (0x3538...bad0)" : "Paste EVM address (0x...)"}
+            disabled={useDemoData}
+            value={useDemoData ? "" : walletInput}
+            onChange={(e) => setWalletInput(e.target.value)}
+            className="flex-1 px-3 py-1.5 rounded-xl border text-xs font-mono focus:outline-none transition-all disabled:opacity-50 text-white"
+            style={{ background: C.surface, borderColor: C.border }}
+          />
+          <button
+            onClick={handleFetchWallet}
+            disabled={isFetchingWallet}
+            className="px-4 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all text-white"
+            style={{ background: C.accent }}
+          >
+            {isFetchingWallet ? <RefreshCw size={12} className="animate-spin" /> : <Database size={12} />}
+            FETCH
+          </button>
+        </div>
+        <p className="text-[10px]" style={{ color: C.textMuted }}>
+          Loaded Profile: <span className="font-mono text-white font-semibold">{activeAddress.slice(0, 12)}...{activeAddress.slice(-8)}</span>
+        </p>
+      </div>
+
       <div className="flex-1 px-5 py-5 space-y-4">
         {/* ═══ TAB: RISK ENGINE ═══════════════════════════════════════════ */}
         {activeTab === "risk" && (
@@ -417,7 +522,6 @@ export default function SodexLaunchPanel({
                       <p className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>Portfolio Risk Score</p>
                     </div>
                     <RiskGauge score={compositeScore.score} grade={compositeScore.grade} label={compositeScore.label} color={compositeScore.color} />
-                    {/* Sub-score breakdown */}
                     <div className="grid grid-cols-5 gap-1.5 mt-4">
                       {([
                         { label: "Conc.", value: compositeScore.subScores.concentration },
@@ -468,7 +572,6 @@ export default function SodexLaunchPanel({
                         </div>
                       ))}
                     </div>
-                    {/* Additional stats row */}
                     <div className="grid grid-cols-3 gap-2">
                       {([
                         { label: "Win Rate", value: `${riskMetrics.dailyWinRate.toFixed(0)}%`, color: riskMetrics.dailyWinRate > 50 ? C.success : C.warning },
@@ -498,16 +601,13 @@ export default function SodexLaunchPanel({
                         </span>
                       )}
                     </div>
-                    {/* Matrix grid */}
                     <div className="space-y-1">
-                      {/* Header row */}
                       <div className="grid gap-1" style={{ gridTemplateColumns: "40px repeat(3, 1fr)" }}>
                         <div />
                         {["BTC", "ETH", "SOL"].map((a) => (
                           <div key={a} className="text-center text-[9px] font-bold" style={{ color: ASSET_COLORS[a] }}>{a}</div>
                         ))}
                       </div>
-                      {/* Data rows */}
                       {["BTC", "ETH", "SOL"].map((row) => (
                         <div key={row} className="grid gap-1" style={{ gridTemplateColumns: "40px repeat(3, 1fr)" }}>
                           <div className="flex items-center text-[9px] font-bold" style={{ color: ASSET_COLORS[row] }}>{row}</div>
@@ -518,8 +618,7 @@ export default function SodexLaunchPanel({
                       ))}
                     </div>
                     <p className="text-[9px]" style={{ color: C.textMuted }}>
-                      Avg correlation: <span className="font-bold" style={{ color: correlation.avgAbsCorrelation > 0.7 ? C.danger : C.textSecondary }}>{(correlation.avgAbsCorrelation * 100).toFixed(0)}%</span>
-                      {correlation.contagionAlert ? " — Diversification is ineffective during current regime." : ""}
+                      Avg correlation: <span className="font-bold font-mono" style={{ color: correlation.avgAbsCorrelation > 0.7 ? C.danger : C.textSecondary }}>{(correlation.avgAbsCorrelation * 100).toFixed(0)}%</span>
                     </p>
                   </div>
                 )}
@@ -561,7 +660,6 @@ export default function SodexLaunchPanel({
                       <p className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>Concentration Risk</p>
                     </div>
                     <div className="flex items-center gap-5">
-                      {/* Donut */}
                       <div className="w-[80px] h-[80px] relative shrink-0">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
@@ -572,7 +670,7 @@ export default function SodexLaunchPanel({
                         </ResponsiveContainer>
                       </div>
                       <div className="flex-1 space-y-1.5 text-xs">
-                        <div className="flex justify-between"><span style={{ color: C.textMuted }}>HHI Index</span><span className="font-bold font-mono" style={{ color: concentration.hhi > 4000 ? C.danger : concentration.hhi > 2500 ? C.warning : C.success }}>{concentration.hhi}</span></div>
+                        <div className="flex justify-between"><span style={{ color: C.textMuted }}>HHI Index</span><span className="font-bold font-mono text-white">{concentration.hhi}</span></div>
                         <div className="flex justify-between"><span style={{ color: C.textMuted }}>Effective Positions</span><span className="font-bold font-mono text-white">{concentration.effectiveN}</span></div>
                         <div className="flex justify-between"><span style={{ color: C.textMuted }}>Top Position</span><span className="font-bold" style={{ color: ASSET_COLORS[concentration.topAsset] }}>{concentration.topAsset} ({(concentration.topAssetWeight * 100).toFixed(0)}%)</span></div>
                         <div className="flex justify-between"><span style={{ color: C.textMuted }}>Grade</span><span className="font-bold" style={{ color: concentration.hhi > 4000 ? C.danger : concentration.hhi > 2500 ? C.warning : C.success }}>{concentration.grade}</span></div>
@@ -625,21 +723,11 @@ export default function SodexLaunchPanel({
                           </p>
                         </div>
                         <div className="text-center">
-                          <p className="text-[8px] uppercase" style={{ color: C.textMuted }}>New Risk Score</p>
+                          <p className="text-[8px] uppercase" style={{ color: C.textMuted }}>Stressed Risk Score</p>
                           <p className="text-[14px] font-black font-mono" style={{ color: scenarioResult.newRiskScore > 65 ? C.danger : scenarioResult.newRiskScore > 45 ? C.warning : C.success }}>
                             {scenarioResult.newRiskScore}/100
                           </p>
                         </div>
-                      </div>
-                      <div className="space-y-1">
-                        {scenarioResult.assetImpacts.filter((a) => a.dollarLoss > 0).map((a) => (
-                          <div key={a.asset} className="flex justify-between text-[10px]">
-                            <span style={{ color: ASSET_COLORS[a.asset] }}>{a.asset}</span>
-                            <span className="font-mono" style={{ color: a.impactPct < 0 ? C.danger : C.success }}>
-                              {a.impactPct < 0 ? "-" : "+"}${a.dollarLoss.toFixed(0)}
-                            </span>
-                          </div>
-                        ))}
                       </div>
                     </div>
                   )}
@@ -658,7 +746,7 @@ export default function SodexLaunchPanel({
                       return (
                         <div key={idx} className="flex items-start gap-2.5 p-3 rounded-xl border" style={{ background: `${iconColor}08`, borderColor: `${iconColor}20` }}>
                           <SevIcon size={13} className="shrink-0 mt-0.5" style={{ color: iconColor }} />
-                          <p className="text-[10.5px] leading-relaxed" style={{ color: C.textSecondary }}>
+                          <p className="text-[10.5px] leading-relaxed text-left" style={{ color: C.textSecondary }}>
                             {rec.message}
                           </p>
                         </div>
@@ -722,10 +810,73 @@ export default function SodexLaunchPanel({
         {/* ═══ TAB: AUTOPSY ═══════════════════════════════════════════════ */}
         {activeTab === "autopsy" && (
           <div className="space-y-4 animate-fade-in-up">
+            {/* Trader performance scorecard */}
+            <div className="p-5 rounded-2xl border" style={{ background: C.panel, borderColor: C.border }}>
+              <div className="flex items-center gap-2 mb-4">
+                <Sliders size={14} style={{ color: C.accent }} />
+                <span className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>Performance Audit Profile</span>
+              </div>
+
+              {/* Edge Score Circular Meter */}
+              <div className="flex flex-col items-center gap-2 mb-5">
+                <div className="relative flex items-center justify-center w-28 h-28">
+                  <svg className="w-28 h-28 transform -rotate-90">
+                    <circle cx="56" cy="56" r="48" fill="none" stroke={C.border} strokeWidth="8" />
+                    <motion.circle
+                      cx="56" cy="56" r="48" fill="none"
+                      stroke={edgeScore >= 85 ? C.success : edgeScore >= 65 ? C.warning : C.danger}
+                      strokeWidth="8"
+                      strokeDasharray={2 * Math.PI * 48}
+                      initial={{ strokeDashoffset: 2 * Math.PI * 48 }}
+                      animate={{ strokeDashoffset: 2 * Math.PI * 48 - (edgeScore / 100) * 2 * Math.PI * 48 }}
+                      transition={{ duration: 1.2, ease: "easeOut" }}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="absolute flex flex-col items-center justify-center">
+                    <span className="text-3xl font-black text-white">{edgeScore}</span>
+                    <span className="text-[9px] font-bold text-gray-500 uppercase">Edge score</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                    style={{
+                      background: edgeScore >= 85 ? `${C.success}20` : edgeScore >= 65 ? `${C.warning}20` : `${C.danger}20`,
+                      color: edgeScore >= 85 ? C.success : edgeScore >= 65 ? C.warning : C.danger
+                    }}>
+                    {edgeGrade}
+                  </span>
+                </div>
+              </div>
+
+              {/* Key metrics grid */}
+              <div className="grid grid-cols-2 gap-3 text-xs mt-3">
+                <div className="p-3 rounded-xl border flex flex-col justify-between" style={{ background: C.surface, borderColor: C.border }}>
+                  <span style={{ color: C.textMuted }}>30D Volume</span>
+                  <span className="text-[15px] font-black text-white font-mono mt-1">${(volume / 1000000).toFixed(2)}M</span>
+                </div>
+                <div className="p-3 rounded-xl border flex flex-col justify-between" style={{ background: C.surface, borderColor: C.border }}>
+                  <span style={{ color: C.textMuted }}>SoDEX 30D PNL</span>
+                  <span className="text-[15px] font-black font-mono mt-1" style={{ color: netPnl >= 0 ? C.success : C.danger }}>
+                    {netPnl >= 0 ? "+" : ""}${netPnl.toLocaleString()}
+                  </span>
+                </div>
+                <div className="p-3 rounded-xl border flex flex-col justify-between" style={{ background: C.surface, borderColor: C.border }}>
+                  <span style={{ color: C.textMuted }}>Profit Factor</span>
+                  <span className="text-[15px] font-black text-white font-mono mt-1">{profitFactor.toFixed(2)}</span>
+                </div>
+                <div className="p-3 rounded-xl border flex flex-col justify-between" style={{ background: C.surface, borderColor: C.border }}>
+                  <span style={{ color: C.textMuted }}>Win Rate</span>
+                  <span className="text-[15px] font-black text-white font-mono mt-1">{autopsyWinRate.toFixed(0)}%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Slicers */}
             <div className="p-4 rounded-2xl border space-y-3" style={{ background: C.panel, borderColor: C.border }}>
               <div className="flex items-center gap-2">
                 <Sliders size={14} style={{ color: C.accent }} />
-                <p className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>Multi-Dimensional Slicers</p>
+                <p className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>Trade Slicers Filter</p>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div className="space-y-1">
@@ -761,23 +912,46 @@ export default function SodexLaunchPanel({
               ]).map((s) => (
                 <div key={s.label} className="p-2 rounded-xl text-center border" style={{ background: C.panel, borderColor: C.border }}>
                   <p className="text-[9px] uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>{s.label}</p>
-                  <p className="text-[12px] font-bold" style={{ color: s.color }}>{s.value}</p>
+                  <p className="text-[12px] font-bold font-mono" style={{ color: s.color }}>{s.value}</p>
                 </div>
               ))}
             </div>
 
+            {/* Edgework Leak Diagnostics */}
+            <div className="p-4 rounded-2xl border space-y-3" style={{ background: C.panel, borderColor: C.border }}>
+              <div className="flex items-center gap-2">
+                <AlertCircle size={14} style={{ color: C.danger }} />
+                <span className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>Leaky Setup Diagnostics</span>
+              </div>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between items-center p-2.5 rounded-xl border" style={{ background: `${C.danger}05`, borderColor: `${C.danger}15` }}>
+                  <span style={{ color: C.textMuted }}>Biggest Leak</span>
+                  <span className="font-bold text-rose-500">SOL Bearish (-$406 / trade)</span>
+                </div>
+                <div className="flex justify-between items-center p-2.5 rounded-xl border" style={{ background: `${C.success}05`, borderColor: `${C.success}15` }}>
+                  <span style={{ color: C.textMuted }}>Best Edge</span>
+                  <span className="font-bold text-emerald-400">BTC Bullish (+$300 / trade)</span>
+                </div>
+                <div className="flex justify-between items-center p-2.5 rounded-xl border" style={{ background: C.surface, borderColor: C.border }}>
+                  <span style={{ color: C.textMuted }}>Exchange Fees Paid</span>
+                  <span className="font-bold font-mono text-white">-${feesPaid.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Skipped performance anti-pattern alert */}
             <div className="p-3 rounded-xl border space-y-2" style={{ background: `${C.danger}10`, borderColor: `${C.danger}20` }}>
               <div className="flex items-start gap-2">
                 <AlertTriangle size={14} style={{ color: C.danger }} className="shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="text-xs font-bold" style={{ color: C.danger }}>Leaking Edge Detected</h4>
+                  <h4 className="text-xs font-bold" style={{ color: C.danger }}>Performance Leak Exclusions</h4>
                   <p className="text-[10px] leading-relaxed mt-1" style={{ color: C.textSecondary }}>
-                    Trading <span className="text-white font-bold">SOL during Bearish regimes</span> has a negative expectancy of <span className="text-white font-bold">-$406/trade</span>. Skipping this recovers <span className="text-emerald-400 font-bold">$1,625</span>.
+                    Avoid trading SOL during bearish conditions to recover your biggest leak and lift overall returns.
                   </p>
                 </div>
               </div>
               <div className="pt-2 border-t flex items-center justify-between" style={{ borderColor: `${C.danger}10` }}>
-                <span className="text-[10px]" style={{ color: C.textMuted }}>Skip simulation:</span>
+                <span className="text-[10px]" style={{ color: C.textMuted }}>Simulate Skip SOL Bearish:</span>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input type="checkbox" checked={excludeWorstPattern} onChange={(e) => setExcludeWorstPattern(e.target.checked)} className="sr-only peer" />
                   <div className="w-7 h-4 bg-neutral-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -815,6 +989,9 @@ export default function SodexLaunchPanel({
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
+              <p className="text-[9px]" style={{ color: C.textMuted }}>
+                Dashed line simulates overall growth after skipping identified performance leak setups.
+              </p>
             </div>
           </div>
         )}
@@ -828,7 +1005,7 @@ export default function SodexLaunchPanel({
                 <p className="text-[12px] font-bold text-white">Select Asset</p>
               </div>
               <select value={activeAsset} onChange={(e) => setActiveAsset(e.target.value)}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#141414] border border-[#1C1C1C] text-white focus:outline-none cursor-pointer">
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#141414] border-[#1C1C1C] text-white focus:outline-none cursor-pointer">
                 {["BTC", "ETH", "SOL"].map((o) => <option key={o} value={o}>{o}</option>)}
               </select>
             </div>
