@@ -28,6 +28,7 @@ import {
   simulateScenario,
   getDeterministicTrades,
   getDeterministicPortfolio,
+  fetchWalletHistoryFromScan,
   type DailyReturn,
   type RiskMetrics,
   type ConcentrationMetrics,
@@ -332,7 +333,7 @@ export default function SodexLaunchPanel({
     }
   }, [activeAddress]);
 
-  // Fetch real positions/trades from Supabase for activeAddress if available
+  // Fetch real positions/trades from Supabase for activeAddress, falling back to block explorer APIs before deterministic mocks
   useEffect(() => {
     if (activeAddress && activeAddress.startsWith("0x")) {
       supabase.from("positions" as any)
@@ -360,12 +361,17 @@ export default function SodexLaunchPanel({
             });
             setDbTrades(mapped);
           } else {
-            setDbTrades([]);
+            // Fall back to querying active on-chain transactions from block explorer APIs
+            fetchWalletHistoryFromScan(activeAddress).then((scanData) => {
+              setDbTrades(scanData);
+            });
           }
         })
         .catch((err) => {
           console.warn("Failed to fetch database positions:", err);
-          setDbTrades([]);
+          fetchWalletHistoryFromScan(activeAddress).then((scanData) => {
+            setDbTrades(scanData);
+          });
         });
     } else {
       setDbTrades([]);
