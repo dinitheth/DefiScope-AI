@@ -1,6 +1,6 @@
 # DefiScope AI
 
-AI-powered portfolio and performance intelligence - ask any crypto question, get live data-backed answers, and utilize the interactive index and autopsy workspace panel.
+AI-powered portfolio and performance intelligence - ask any crypto question, get live data-backed answers, and utilize the interactive risk auditing and autopsy workspace panel.
 
 [![SoSoValue Buildathon 2026](https://img.shields.io/badge/SoSoValue-Buildathon%202026-blue)](https://sosovalue.com)
 [![Wave 3 Complete](https://img.shields.io/badge/Wave-3%20Complete-green)](https://github.com/dinitheth/DefiScope-AI)
@@ -31,30 +31,23 @@ FlowPulse Strategy - Turns DefiScope into an AI strategy desk that generates mar
 
 # The Problem It Solves
 
-Crypto research is scattered across dashboards, charts, news feeds, ETF trackers, and exchanges. DefiScope brings that entire workflow into one place.
+Crypto research and portfolio auditing are highly fragmented:
+*   Traders check market tickers on one app, read news on another, track ETF flows on third-party tables, and audit their own trade logs manually.
+*   Most platforms focus purely on *raw data* or *price predictions* instead of explaining **what the data means** or **where the trader is losing money**.
 
-Instead of showing raw data, it explains what the data means. A user can quickly understand:
-- Market direction
-- ETF flow pressure
-- News sentiment
-- Opportunity quality
-- Risk - all before making a decision
+DefiScope AI consolidates this entire loop. It doesn't just show data; it **diagnoses portfolio risk** and **forensically identifies execution leaks** in one click.
 
 ---
 
-# Challenges We Ran Into
+# Challenges We Ran Into & Solutions
 
-The hardest part was making live data reliable. 
+### 1. Public Wallet History Retrieval (Without API Keys)
+*   **The Problem**: We wanted users to paste any wallet address to autopsy their historical performance, but querying private exchange databases or requiring users to sign in with API keys breaks the seamless web experience.
+*   **The Solution**: By auditing the public REST gateways of SoDEX, we discovered that account position history endpoints (`/perps/accounts/{userAddress}/positions/history`) are fully public and require no auth headers. We implemented a parallel fetcher that pulls from **SoDEX Mainnet**, **SoDEX Testnet**, **Basescan**, and **Etherscan** APIs to compile a real-time ledger on the fly.
 
-Some SoSoValue endpoints provide market intelligence, while coin price data needed stronger normalization. The Opportunity Discovery panel was rendering, but some data was missing or empty.
-
-Fixes applied:
-- Improved the SoSoValue client proxy
-- Added coinMarkets integration for live Binance price data
-- Added fallback opportunity ranking
-- Made the UI handle empty states safely
-
-Another challenge was finding the right use case. A simple "Trade BTC now" agent felt too generic, so Agent mode was reframed into a strategy analysis and portfolio execution workflow.
+### 2. Multi-Asset ERC20 On-Chain Balance Fetching
+*   **The Problem**: Wallet balances in React apps are often mocked or restricted to native gas assets. We needed to load the user's real holdings (USDC, BTC, ETH, SOL) to populate the Risk Engine and Rebalancer.
+*   **The Solution**: We integrated direct JSON-RPC queries using `window.ethereum` (MetaMask/Rabby). The app dynamically queries the connected chain ID, maps token contracts for both **Base Mainnet** and **Ethereum Mainnet**, and executes standard `eth_call` queries for `balanceOf(address)` to fetch multi-token balances on-chain.
 
 ---
 
@@ -67,7 +60,8 @@ Another challenge was finding the right use case. A simple "Trade BTC now" agent
 | Backend | Supabase + Edge Functions |
 | Data | SoSoValue API |
 | AI | AI decision / tool-calling workflow |
-| On-chain | SoDEX Testnet API |
+| On-chain | JSON-RPC (`eth_call`, `eth_getBalance`), Basescan, Etherscan |
+| DEX Gateways | SoDEX Mainnet & Testnet REST APIs |
 | Deployment | Vercel |
 
 ---
@@ -97,14 +91,12 @@ Strategy Memo -> Allocation -> Risk Notes -> Optional Action
 
 # What We Learned
 
-The best product is not just an AI trading button.
-> The stronger use case is an AI market intelligence and strategy desk.
-
-We also learned that data reliability matters as much as AI quality. If API shapes change or return empty arrays, the user experience breaks entirely. Strong normalization, fallback logic, and clear empty states are essential.
+*   **Actionable Forensics > Generic Signals**: A generic *"Should I buy BTC"* bot is not enough. The true value lies in helping traders understand *where their edge breaks*. Pinpointing a specific performance leak (e.g., trading SOL during bearish regimes at night) saves more capital than typical buy/sell alerts.
+*   **Reliability & Fallbacks**: API shapes change and on-chain accounts can be fresh and empty. Building clean, structured fallbacks (e.g., seeding a deterministic mock ledger from the wallet's hash when a fresh wallet connects) ensures the product is always interactive and functional.
 
 ---
 
-# Development Milestones
+# Completed Development Milestones
 
 ## Wave 2 - SoDEX Panel & Interactive Workspace (Completed!)
 
@@ -121,24 +113,20 @@ Instead of using blocked third-party iframes, Wave 2 integrates a premium SoDEX 
 
 ---
 
-## Wave 3 - Risk Engine & Performance Autopsy (Completed!)
+## Wave 3 - Institutional Risk Engine & Autopsy (Completed Final Wave!)
 
 Wave 3 introduces an institutional-grade Risk Engine and Performance Autopsy workstation:
-- [x] Composite Risk Score (0-100): Weighted score from concentration, volatility, drawdown, correlation, and tail risk sub-components, with animated gauge and letter grades (A+ through D).
-- [x] 16 Risk Metrics: Historical VaR/CVaR (95% and 99%), Sharpe, Sortino, Calmar, Omega ratios, Ulcer Index, Max Drawdown with duration tracking, annualized return and volatility, daily win rate.
-- [x] Correlation Heatmap: 3x3 pairwise correlation matrix for BTC/ETH/SOL with contagion alert when average correlation exceeds 75%.
-- [x] Risk Contribution Analysis: Per-asset marginal risk contribution bars showing which positions drive the most portfolio risk.
-- [x] Concentration Risk Panel: HHI index, Effective N (equivalent equal-weight positions), top-asset dominance, and diversification grade.
-- [x] Scenario Simulator: Interactive "What-if" tool to stress-test the portfolio against -10% to -50% shocks on individual assets or the entire market.
-- [x] AI Risk Recommendations: Actionable severity-tagged suggestions generated dynamically from which risk sub-scores are elevated.
-- [x] Performance Autopsy: Multi-dimensional slicing of trading history by Asset, Regime, and Entry Hour with counterfactual equity curve overlay.
-- [x] SoDEX Rebalance Simulator: Holdings calculator with swap routing on simulated orderbook.
-- [x] System Diagnostics: Real-time integration check with latency indicators for SoSoValue and Binance feeds.
+- [x] **16 Quantitative Risk Metrics**: Sharpe, Sortino, Calmar, Omega, historical VaR/CVaR, and max drawdowns.
+- [x] **Correlation Heatmap**: 3x3 pairwise correlation matrix with Contagion warning thresholds.
+- [x] **Scenario Stress-Testing**: Shock holdings by up to -50% to evaluate tail-risk impact.
+- [x] **Direct SoDEX REST API Integrations**: Pull positions history directly from mainnet and testnet.
+- [x] **On-Chain Balance Retrieval**: Standard JSON-RPC ERC20 queries for multi-token balances on Base/Ethereum.
+- [x] **Explorer Crawlers**: Fallback to Etherscan/Basescan APIs for transaction history.
 
 ---
 
-## Long-Term Vision
-> DefiScope becomes a lightweight AI fund-manager assistant that researches markets, explains decisions, performs diagnostic trade autopsies, and connects those strategies to simulated execution rails.
+## Product Vision
+> DefiScope stands as a fully operational **AI market intelligence and strategy desk** that researches markets, explains decisions, performs diagnostic trade autopsies, and connects those strategies to simulated execution rails.
 
 ---
 
