@@ -989,7 +989,7 @@ export default function SodexLaunchPanel({
               ))}
             </div>
 
-            {/* Edgework Leak Diagnostics */}
+            {/* Performance Leak Diagnostics */}
             <div className="p-4 rounded-2xl border space-y-3" style={{ background: C.panel, borderColor: C.border }}>
               <div className="flex items-center gap-2">
                 <AlertCircle size={14} style={{ color: C.danger }} />
