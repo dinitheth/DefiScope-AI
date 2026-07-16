@@ -308,11 +308,12 @@ export default function SodexLaunchPanel({
 
   useEffect(() => { runRiskEngine(); }, [runRiskEngine]);
 
-  // Fetch native on-chain balance from MetaMask / wallet provider when activeAddress changes
+  // Fetch native and ERC20 balances from MetaMask / wallet provider when activeAddress changes
   useEffect(() => {
     if (activeAddress && activeAddress.startsWith("0x") && typeof window !== "undefined") {
       const ethereum = getAllowedProvider();
       if (ethereum && typeof ethereum.request === "function") {
+        // 1. Fetch native ETH
         ethereum.request({
           method: "eth_getBalance",
           params: [activeAddress, "latest"]
@@ -328,6 +329,80 @@ export default function SodexLaunchPanel({
         })
         .catch((err: any) => {
           console.warn("Failed to fetch native ETH balance:", err);
+        });
+
+        // 2. Fetch chain ID to select token contract addresses
+        ethereum.request({ method: "eth_chainId" })
+        .then((chainIdHex: any) => {
+          const chainId = parseInt(chainIdHex, 16);
+          const cleanAddr = activeAddress.toLowerCase().replace("0x", "");
+          const data = `0x70a08231000000000000000000000000${cleanAddr}`;
+          
+          let usdcContract = "";
+          let btcContract = "";
+          let solContract = "";
+          let usdcDecimals = 6;
+          let btcDecimals = 8;
+          let solDecimals = 9;
+
+          if (chainId === 8453) {
+            // Base Mainnet
+            usdcContract = "0x833589fCD6eDb35d25643152705121bc014856b3";
+            btcContract = "0xcbB7C7A670Fd14197F264d1f579f18B5bee7d13E"; // cbBTC
+            solContract = "0x22ed64032d96c9e4210df66db49debc5a727c62d"; // SOL on Base
+            usdcDecimals = 6;
+            btcDecimals = 8;
+            solDecimals = 18;
+          } else {
+            // Ethereum Mainnet (default fallback)
+            usdcContract = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+            btcContract = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599";
+            solContract = "0xD31a59c85AE9D8edEFeC41199986b761820d2e13";
+            usdcDecimals = 6;
+            btcDecimals = 8;
+            solDecimals = 9;
+          }
+
+          // Query USDC balance
+          if (usdcContract) {
+            ethereum.request({
+              method: "eth_call",
+              params: [{ to: usdcContract, data }, "latest"]
+            }).then((hex: any) => {
+              if (hex && hex !== "0x") {
+                const val = parseInt(hex, 16) / Math.pow(10, usdcDecimals);
+                setHoldings((prev) => ({ ...prev, USDC: val.toFixed(2) }));
+              }
+            }).catch(() => {});
+          }
+
+          // Query BTC balance
+          if (btcContract) {
+            ethereum.request({
+              method: "eth_call",
+              params: [{ to: btcContract, data }, "latest"]
+            }).then((hex: any) => {
+              if (hex && hex !== "0x") {
+                const val = parseInt(hex, 16) / Math.pow(10, btcDecimals);
+                setHoldings((prev) => ({ ...prev, BTC: val.toFixed(4) }));
+              }
+            }).catch(() => {});
+          }
+
+          // Query SOL balance
+          if (solContract) {
+            ethereum.request({
+              method: "eth_call",
+              params: [{ to: solContract, data }, "latest"]
+            }).then((hex: any) => {
+              if (hex && hex !== "0x") {
+                const val = parseInt(hex, 16) / Math.pow(10, solDecimals);
+                setHoldings((prev) => ({ ...prev, SOL: val.toFixed(4) }));
+              }
+            }).catch(() => {});
+          }
+        }).catch((err: any) => {
+          console.warn("Chain ID query failed:", err);
         });
       }
     }

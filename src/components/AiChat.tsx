@@ -29,7 +29,7 @@ import SodexLaunchPanel from "./SodexLaunchPanel";
 import ToolCarousel from "./ai-views/ToolCarousel";
 
 import Typewriter from "./ai-views/Typewriter";
-import { getDeterministicTrades } from "@/lib/risk-engine";
+import { getDeterministicTrades, fetchWalletHistoryFromScan } from "@/lib/risk-engine";
 import { useChatHistory } from "@/hooks/use-chat-history";
 import {
   checkSosoHealth,
@@ -276,27 +276,35 @@ export default function AiChat() {
     if (isWalletQuery) {
       setSodexPanelOpen(true);
       
-      let replyContent = "";
       const targetAddress = wallet.address || "0x3538f0e0e8bc3b379ed3c5b9dc6deb236339bad0";
       const shortAddr = `${targetAddress.slice(0, 6)}...${targetAddress.slice(-4)}`;
       
-      const tradesList = getDeterministicTrades(targetAddress);
-      const winCount = tradesList.filter(t => t.pnl > 0).length;
-      const winRate = (winCount / tradesList.length) * 100;
-      const netPnlVal = tradesList.reduce((sum, t) => sum + t.pnl, 0);
-      const grossGains = tradesList.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
-      const grossLosses = Math.abs(tradesList.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
-      const profitFactor = grossLosses > 0 ? (grossGains / grossLosses) : grossGains;
-      
-      const winRateWeight = (winRate / 100) * 40;
-      const pfWeight = Math.min(2.5, profitFactor) / 2.5 * 40;
-      const pnlWeight = Math.max(-20, Math.min(20, netPnlVal / 1000));
-      const edgeScore = Math.round(Math.max(10, Math.min(99, winRateWeight + pfWeight + pnlWeight + 20)));
-      const edgeGrade = edgeScore >= 85 ? "Elite Edge" : edgeScore >= 65 ? "Consistent Edge" : edgeScore >= 45 ? "Neutral Edge" : "Bleeding Edge";
-      
-      if (lowerText.includes("risk") || lowerText.includes("assessment") || lowerText.includes("portfolio")) {
-        setPanelTab("risk");
-        replyContent = `### Portfolio Risk Audit Profile: **${shortAddr}**
+      // Fetch real on-chain transaction history dynamically
+      fetchWalletHistoryFromScan(targetAddress).then((scanData) => {
+        let tradesList = scanData;
+        let isSimulated = false;
+        if (!tradesList || tradesList.length === 0) {
+          tradesList = getDeterministicTrades(targetAddress);
+          isSimulated = true;
+        }
+        
+        const winCount = tradesList.filter(t => t.pnl > 0).length;
+        const winRate = tradesList.length > 0 ? (winCount / tradesList.length) * 100 : 0;
+        const netPnlVal = tradesList.reduce((sum, t) => sum + t.pnl, 0);
+        const grossGains = tradesList.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
+        const grossLosses = Math.abs(tradesList.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
+        const profitFactor = grossLosses > 0 ? (grossGains / grossLosses) : grossGains;
+        
+        const winRateWeight = (winRate / 100) * 40;
+        const pfWeight = Math.min(2.5, profitFactor) / 2.5 * 40;
+        const pnlWeight = Math.max(-20, Math.min(20, netPnlVal / 1000));
+        const edgeScore = Math.round(Math.max(10, Math.min(99, winRateWeight + pfWeight + pnlWeight + 20)));
+        const edgeGrade = edgeScore >= 85 ? "Elite Edge" : edgeScore >= 65 ? "Consistent Edge" : edgeScore >= 45 ? "Neutral Edge" : "Bleeding Edge";
+        
+        let replyContent = "";
+        if (lowerText.includes("risk") || lowerText.includes("assessment") || lowerText.includes("portfolio")) {
+          setPanelTab("risk");
+          replyContent = `### Portfolio Risk Audit Profile: **${shortAddr}**
 
 Here is the institutional-grade risk assessment of your current portfolio holdings, compiled using 90-day daily kline metrics from Binance:
 
@@ -305,10 +313,12 @@ Here is the institutional-grade risk assessment of your current portfolio holdin
 - **Concentration Index (HHI)**: Your concentration HHI is **3,650**, reflecting a **Moderately Concentrated** allocation with **2.1** effective equal-weight positions.
 - **Tail Risk (CVaR)**: In extreme liquidation events (the worst 5% of days), the average expected portfolio drop is **-5.8%**.
 
+${isSimulated ? `> [!NOTE]\n> **Simulated Profile Loaded**: No direct perpetuals trade history found on SoDEX Mainnet/Testnet for this address. Displaying a benchmark profile seeded by your wallet hash.` : `> [!TIP]\n> **Real-Time Data Loaded**: Successfully fetched ${tradesList.length} trades from SoDEX & Basescan APIs.`}
+
 *I have synchronized the live risk parameters, rolling covariance matrix, and scenario simulator in the left **Risk Engine** workspace.*`;
-      } else {
-        setPanelTab("autopsy");
-        replyContent = `### SoDEX Trade Performance Autopsy: **${shortAddr}**
+        } else {
+          setPanelTab("autopsy");
+          replyContent = `### SoDEX Trade Performance Autopsy: **${shortAddr}**
 
 I have conducted a multi-dimensional slice of your historical trade ledger to identify execution inefficiencies and calculate your statistical edge:
 
@@ -318,19 +328,25 @@ I have conducted a multi-dimensional slice of your historical trade ledger to id
 - **Biggest Leak**: **SOL trades during bearish regimes**. Slicing this setup reveals an expectancy gap of **-$406 per trade**, bleeding a total of **-$1,625** from your returns.
 - **Best Edge**: **BTC trades during bullish regimes**, yielding a positive expectancy of **+$300 per trade**.
 
+${isSimulated ? `> [!NOTE]\n> **Simulated Profile Loaded**: No direct perpetuals trade history found on SoDEX Mainnet/Testnet for this address. Displaying a benchmark profile seeded by your wallet hash.` : `> [!TIP]\n> **Real-Time Data Loaded**: Successfully fetched ${tradesList.length} trades from SoDEX & Basescan APIs.`}
+
 *I have opened your trade journal, correlation-adjusted curves, and counterfactual equity curve in the left **Autopsy** workspace tab. Check the "Simulate Skip SOL Bearish" switch to visualize your counterfactual return potential.*`;
-      }
-      
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? { ...m, content: replyContent, animate: true }
-            : m
-        )
-      );
-      
-      history.saveMessage(convoId, "assistant", replyContent).catch(() => {});
-      setBusy(false);
+        }
+        
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? { ...m, content: replyContent, animate: true }
+              : m
+          )
+        );
+        
+        history.saveMessage(convoId, "assistant", replyContent).catch(() => {});
+        setBusy(false);
+      }).catch((err) => {
+        console.error("Wallet history scan error in chat:", err);
+        setBusy(false);
+      });
       return;
     }
 
