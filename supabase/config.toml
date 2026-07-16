@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.sosovalue]
 verify_jwt = false
+
+[functions.sodex-mainnet-account]
+verify_jwt = false

@@ -238,7 +238,7 @@ export default function StrategyHistory() {
         if (error) {
           setFetchError(error.message);
         } else {
-          setRecords((data as StrategyRecord[]) ?? []);
+          setRecords((data as unknown as StrategyRecord[]) ?? []);
         }
         setLoading(false);
       });

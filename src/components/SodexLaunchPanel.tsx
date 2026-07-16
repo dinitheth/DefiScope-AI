@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   TrendingUp, TrendingDown, Activity, ExternalLink, Copy,
@@ -9,15 +9,15 @@ import {
 } from "lucide-react";
 import TradingViewWidget from "./TradingViewWidget";
 import { fetchCoinList } from "@/lib/sosovalue-api";
-import { supabase } from "@/integrations/supabase/client";
-import { useWallet, getAllowedProvider } from "@/hooks/use-wallet";
+import { useWallet } from "@/hooks/use-wallet";
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip,
   PieChart, Pie, Cell
 } from "recharts";
 import { toast } from "@/hooks/use-toast";
 import {
-  fetchDailyReturns,
+  fetchMainnetDailyReturns,
+  getDataCoverage,
   computePortfolioReturns,
   computeAllRiskMetrics,
   computeConcentration,
@@ -26,9 +26,10 @@ import {
   computeCompositeScore,
   generateRecommendations,
   simulateScenario,
-  getDeterministicTrades,
-  getDeterministicPortfolio,
-  fetchWalletHistoryFromScan,
+  fetchMainnetWalletSnapshot,
+  createDemoWalletSnapshot,
+  buildMainnetAllocation,
+  findPerformancePatterns,
   type DailyReturn,
   type RiskMetrics,
   type ConcentrationMetrics,
@@ -38,6 +39,7 @@ import {
   type RiskRecommendation,
   type ScenarioResult,
   type ClosedPosition,
+  type MainnetWalletSnapshot,
 } from "@/lib/risk-engine";
 
 const C = {
@@ -77,6 +79,8 @@ interface SodexSignals {
 }
 
 interface SodexLaunchPanelProps {
+  /** A wallet explicitly requested in chat; takes precedence over the connected wallet. */
+  targetAddress?: string | null;
   activeTab?: "risk" | "autopsy" | "chart";
   onTabChange?: (tab: "risk" | "autopsy" | "chart") => void;
   regime?: string;
@@ -88,7 +92,7 @@ interface SodexLaunchPanelProps {
   allocation?: Record<string, number>;
   tradeSetup?: TradeSetup;
   signals?: SodexSignals;
-  opportunities?: any[];
+  opportunities?: unknown[];
 }
 
 // ─── Animated Gauge SVG ─────────────────────────────────────────────────────
@@ -167,6 +171,7 @@ function CorrCell({ value }: { value: number }) {
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export default function SodexLaunchPanel({
+  targetAddress,
   activeTab: activeTabProp,
   onTabChange,
   regime = "consolidation",
@@ -190,21 +195,31 @@ export default function SodexLaunchPanel({
   const [coinPrices, setCoinPrices] = useState<Record<string, number>>({});
   const [activeAsset, setActiveAsset] = useState(asset);
 
-  // Wallet and Data Source state
+  // Wallet profile is always read from SoDEX mainnet. There is no demo source.
   const { address: connectedAddress } = useWallet();
-  const [useDemoData, setUseDemoData] = useState(true);
+  const [dataMode, setDataMode] = useState<"live" | "demo">("live");
   const [walletInput, setWalletInput] = useState("");
-  const [activeAddress, setActiveAddress] = useState("0x3538f0e0e8bc3b379ed3c5b9dc6deb236339bad0");
+  const [activeAddress, setActiveAddress] = useState<string | null>(null);
   const [isFetchingWallet, setIsFetchingWallet] = useState(false);
+  const [walletSnapshot, setWalletSnapshot] = useState<MainnetWalletSnapshot | null>(null);
+  const [walletDataError, setWalletDataError] = useState<string | null>(null);
 
   // Sync connected wallet to input prefill
   useEffect(() => {
-    if (connectedAddress) {
-      setWalletInput(connectedAddress);
-      setUseDemoData(false);
-      setActiveAddress(connectedAddress);
+    if (connectedAddress && !targetAddress) {
+      if (dataMode === "live") {
+        setWalletInput(connectedAddress);
+        setActiveAddress(connectedAddress);
+      }
     }
-  }, [connectedAddress]);
+  }, [connectedAddress, dataMode, targetAddress]);
+
+  useEffect(() => {
+    if (dataMode === "live" && targetAddress && /^0x[a-fA-F0-9]{40}$/.test(targetAddress)) {
+      setWalletInput(targetAddress);
+      setActiveAddress(targetAddress);
+    }
+  }, [dataMode, targetAddress]);
 
   // Risk Engine state
   const [riskLoading, setRiskLoading] = useState(true);
@@ -220,21 +235,16 @@ export default function SodexLaunchPanel({
   const [scenarioAsset, setScenarioAsset] = useState("ALL");
   const [dbTrades, setDbTrades] = useState<ClosedPosition[]>([]);
 
-  // Rebalancer state
-  const [holdings, setHoldings] = useState({ BTC: "0.2", ETH: "1.5", SOL: "15.0" });
-  const [rebalanceResult, setRebalanceResult] = useState<any[] | null>(null);
-  const [isRebalancing, setIsRebalancing] = useState(false);
-
   // Autopsy filters
   const [filterAsset, setFilterAsset] = useState<string>("ALL");
   const [filterRegime, setFilterRegime] = useState<string>("ALL");
   const [filterHour, setFilterHour] = useState<string>("ALL");
   const [excludeWorstPattern, setExcludeWorstPattern] = useState(false);
 
-  // Get portfolio weights either from chat strategy (if demo & no address) or wallet portfolio
-  const currentAllocation: Record<string, number> = (useDemoData && activeAddress === "0x3538f0e0e8bc3b379ed3c5b9dc6deb236339bad0")
-    ? (allocation || { BTC: 40, ETH: 30, SOL: 20, USDC: 10 })
-    : getDeterministicPortfolio(activeAddress);
+  const currentAllocation = useMemo(
+    () => walletSnapshot ? buildMainnetAllocation(walletSnapshot, coinPrices) : {},
+    [walletSnapshot, coinPrices],
+  );
 
   // ─── Fetch prices ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -251,10 +261,31 @@ export default function SodexLaunchPanel({
 
   // ─── Risk Engine computation ────────────────────────────────────────────
   const runRiskEngine = useCallback(async () => {
+    if (!walletSnapshot || Object.keys(currentAllocation).length === 0) {
+      setDailyReturns([]);
+      setRiskMetrics(null);
+      setConcentration(null);
+      setCorrelation(null);
+      setRiskContribs([]);
+      setCompositeScore(null);
+      setRecommendations([]);
+      setRiskLoading(false);
+      return;
+    }
     setRiskLoading(true);
+    // Never retain a prior wallet's risk view while a new account is loading.
+    setDailyReturns([]);
+    setRiskMetrics(null);
+    setConcentration(null);
+    setCorrelation(null);
+    setRiskContribs([]);
+    setCompositeScore(null);
+    setRecommendations([]);
     try {
-      const assets = Object.keys(currentAllocation).filter((a) => currentAllocation[a] > 0);
-      const returns = await fetchDailyReturns(assets, 90);
+      const assets = Object.keys(currentAllocation).filter((a) => currentAllocation[a] > 0 && a !== "USDC" && a !== "USDT");
+      if (assets.length === 0) throw new Error("No price-risk-bearing assets were reported by SoDEX for this wallet. The account is currently stablecoin-only or contains unsupported instruments.");
+      const returns = await fetchMainnetDailyReturns(assets, 90);
+      if (returns.length < 5) throw new Error("SoDEX mainnet did not return enough daily candles to calculate risk metrics.");
       setDailyReturns(returns);
 
       const portfolioReturns = computePortfolioReturns(returns, currentAllocation);
@@ -272,186 +303,67 @@ export default function SodexLaunchPanel({
 
       const score = computeCompositeScore(conc, metrics, corr);
       
-      // Inject wallet-specific recommendation
       const recs = generateRecommendations(score, conc, metrics, corr);
-      if (activeAddress) {
-        const shortAddr = `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`;
-        const trades = getDeterministicTrades(activeAddress);
-        const winCount = trades.filter(t => t.pnl > 0).length;
-        const winRate = (winCount / trades.length) * 100;
-        const grossGains = trades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
-        const grossLosses = Math.abs(trades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
-        const profitFactor = grossLosses > 0 ? (grossGains / grossLosses) : grossGains;
-        const netPnl = trades.reduce((sum, t) => sum + t.pnl, 0);
-
-        const winRateWeight = (winRate / 100) * 40;
-        const pfWeight = Math.min(2.5, profitFactor) / 2.5 * 40;
-        const pnlWeight = Math.max(-20, Math.min(20, netPnl / 1000));
-        const edgeScore = Math.round(Math.max(10, Math.min(99, winRateWeight + pfWeight + pnlWeight + 20)));
-        const edgeGrade = edgeScore >= 85 ? "Elite Edge" : edgeScore >= 65 ? "Consistent Edge" : edgeScore >= 45 ? "Neutral Edge" : "Bleeding Edge";
-
-        recs.unshift({
-          severity: edgeScore < 50 ? "critical" : edgeScore < 75 ? "warning" : "info",
-          message: `Wallet ${shortAddr} analysis: Edge Score is ${edgeScore}/100 (${edgeGrade}). Total Net PNL is $${netPnl.toLocaleString()}. Biggest performance leak is SOL during bearish regimes.`,
-          metric: "Wallet Check",
-        });
-      }
-
       setCompositeScore(score);
       setRecommendations(recs);
     } catch (err) {
       console.error("Risk engine error:", err);
+      setDailyReturns([]);
+      setRiskMetrics(null);
+      setConcentration(null);
+      setCorrelation(null);
+      setRiskContribs([]);
+      setCompositeScore(null);
+      setRecommendations([]);
+      setWalletDataError(err instanceof Error ? err.message : "Unable to calculate risk metrics from SoDEX mainnet data.");
     } finally {
       setRiskLoading(false);
     }
-  }, [JSON.stringify(currentAllocation), activeAddress]);
+  }, [walletSnapshot, currentAllocation]);
 
   useEffect(() => { runRiskEngine(); }, [runRiskEngine]);
 
-  // Fetch native and ERC20 balances from MetaMask / wallet provider when activeAddress changes
-  useEffect(() => {
-    if (activeAddress && activeAddress.startsWith("0x") && typeof window !== "undefined") {
-      const ethereum = getAllowedProvider();
-      if (ethereum && typeof ethereum.request === "function") {
-        // 1. Fetch native ETH
-        ethereum.request({
-          method: "eth_getBalance",
-          params: [activeAddress, "latest"]
-        })
-        .then((balanceHex: any) => {
-          if (balanceHex && typeof balanceHex === "string") {
-            const ethBalance = parseInt(balanceHex, 16) / 1e18;
-            setHoldings((prev) => ({
-              ...prev,
-              ETH: ethBalance.toFixed(4),
-            }));
-          }
-        })
-        .catch((err: any) => {
-          console.warn("Failed to fetch native ETH balance:", err);
-        });
-
-        // 2. Fetch chain ID to select token contract addresses
-        ethereum.request({ method: "eth_chainId" })
-        .then((chainIdHex: any) => {
-          const chainId = parseInt(chainIdHex, 16);
-          const cleanAddr = activeAddress.toLowerCase().replace("0x", "");
-          const data = `0x70a08231000000000000000000000000${cleanAddr}`;
-          
-          let usdcContract = "";
-          let btcContract = "";
-          let solContract = "";
-          let usdcDecimals = 6;
-          let btcDecimals = 8;
-          let solDecimals = 9;
-
-          if (chainId === 8453) {
-            // Base Mainnet
-            usdcContract = "0x833589fCD6eDb35d25643152705121bc014856b3";
-            btcContract = "0xcbB7C7A670Fd14197F264d1f579f18B5bee7d13E"; // cbBTC
-            solContract = "0x22ed64032d96c9e4210df66db49debc5a727c62d"; // SOL on Base
-            usdcDecimals = 6;
-            btcDecimals = 8;
-            solDecimals = 18;
-          } else {
-            // Ethereum Mainnet (default fallback)
-            usdcContract = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
-            btcContract = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599";
-            solContract = "0xD31a59c85AE9D8edEFeC41199986b761820d2e13";
-            usdcDecimals = 6;
-            btcDecimals = 8;
-            solDecimals = 9;
-          }
-
-          // Query USDC balance
-          if (usdcContract) {
-            ethereum.request({
-              method: "eth_call",
-              params: [{ to: usdcContract, data }, "latest"]
-            }).then((hex: any) => {
-              if (hex && hex !== "0x") {
-                const val = parseInt(hex, 16) / Math.pow(10, usdcDecimals);
-                setHoldings((prev) => ({ ...prev, USDC: val.toFixed(2) }));
-              }
-            }).catch(() => {});
-          }
-
-          // Query BTC balance
-          if (btcContract) {
-            ethereum.request({
-              method: "eth_call",
-              params: [{ to: btcContract, data }, "latest"]
-            }).then((hex: any) => {
-              if (hex && hex !== "0x") {
-                const val = parseInt(hex, 16) / Math.pow(10, btcDecimals);
-                setHoldings((prev) => ({ ...prev, BTC: val.toFixed(4) }));
-              }
-            }).catch(() => {});
-          }
-
-          // Query SOL balance
-          if (solContract) {
-            ethereum.request({
-              method: "eth_call",
-              params: [{ to: solContract, data }, "latest"]
-            }).then((hex: any) => {
-              if (hex && hex !== "0x") {
-                const val = parseInt(hex, 16) / Math.pow(10, solDecimals);
-                setHoldings((prev) => ({ ...prev, SOL: val.toFixed(4) }));
-              }
-            }).catch(() => {});
-          }
-        }).catch((err: any) => {
-          console.warn("Chain ID query failed:", err);
-        });
+  const loadMainnetWallet = useCallback(async (address: string) => {
+    setIsFetchingWallet(true);
+    setWalletDataError(null);
+    setWalletSnapshot(null);
+    setDbTrades([]);
+    try {
+      const snapshot = await fetchMainnetWalletSnapshot(address);
+      setWalletSnapshot(snapshot);
+      setDbTrades(snapshot.closedPositions);
+      if (snapshot.closedPositions.length === 0 && snapshot.spotTrades.length === 0) {
+        setWalletDataError("SoDEX mainnet returned no closed perpetual positions and no spot trade executions for this wallet. No performance or leak metrics are shown.");
       }
+      if (snapshot.errors.length > 0) console.warn("Partial SoDEX mainnet response:", snapshot.errors);
+    } catch (error) {
+      setWalletDataError(error instanceof Error ? error.message : "Unable to load SoDEX mainnet account data.");
+    } finally {
+      setIsFetchingWallet(false);
     }
-  }, [activeAddress]);
+  }, []);
 
-  // Fetch real positions/trades from Supabase for activeAddress, falling back to block explorer APIs before deterministic mocks
   useEffect(() => {
-    if (activeAddress && activeAddress.startsWith("0x")) {
-      supabase.from("positions" as any)
-        .select("*")
-        .then(({ data: posData }) => {
-          if (posData && posData.length > 0) {
-            const mapped: ClosedPosition[] = posData.map((p: any) => {
-              const entry = p.entry_price || 3000;
-              const pnl = p.pnl_usd || 0;
-              const size = p.size || 1;
-              const exit = entry + pnl / size;
-              const dateObj = new Date(p.opened_at || Date.now());
-              return {
-                id: p.id,
-                asset: (p.asset || "ETH").toUpperCase() as any,
-                side: (p.side || "BUY").toUpperCase() as any,
-                entryPrice: Math.round(entry),
-                exitPrice: Math.round(exit),
-                amount: size,
-                pnl: Math.round(pnl),
-                regime: pnl >= 0 ? "bullish" : "bearish",
-                hour: dateObj.getHours(),
-                date: dateObj.toLocaleDateString([], { month: "short", day: "numeric" }),
-              };
-            });
-            setDbTrades(mapped);
-          } else {
-            // Fall back to querying active on-chain transactions from block explorer APIs
-            fetchWalletHistoryFromScan(activeAddress).then((scanData) => {
-              setDbTrades(scanData);
-            });
-          }
-        })
-        .catch((err) => {
-          console.warn("Failed to fetch database positions:", err);
-          fetchWalletHistoryFromScan(activeAddress).then((scanData) => {
-            setDbTrades(scanData);
-          });
-        });
-    } else {
-      setDbTrades([]);
+    if (dataMode === "live" && activeAddress) void loadMainnetWallet(activeAddress);
+  }, [activeAddress, dataMode, loadMainnetWallet]);
+
+  const switchDataMode = (mode: "live" | "demo") => {
+    setDataMode(mode);
+    setWalletDataError(null);
+    if (mode === "demo") {
+      const snapshot = createDemoWalletSnapshot();
+      setWalletSnapshot(snapshot);
+      setDbTrades(snapshot.closedPositions);
+      setActiveAddress(null);
+      return;
     }
-  }, [activeAddress]);
+    setWalletSnapshot(null);
+    setDbTrades([]);
+    if (connectedAddress) {
+      setWalletInput(connectedAddress);
+      setActiveAddress(connectedAddress);
+    }
+  };
 
   // ─── Scenario simulation ───────────────────────────────────────────────
   const runScenario = () => {
@@ -467,61 +379,18 @@ export default function SodexLaunchPanel({
   };
 
   // ─── Rebalancer ─────────────────────────────────────────────────────────
-  const calculateRebalance = () => {
-    const prices = { BTC: coinPrices.BTC || 65000, ETH: coinPrices.ETH || 3500, SOL: coinPrices.SOL || 140, USDC: 1.0 };
-    const btcVal = (parseFloat(holdings.BTC) || 0) * prices.BTC;
-    const ethVal = (parseFloat(holdings.ETH) || 0) * prices.ETH;
-    const solVal = (parseFloat(holdings.SOL) || 0) * prices.SOL;
-    const totalUSD = btcVal + ethVal + solVal;
-    if (totalUSD === 0) return;
-
-    const swaps: any[] = [];
-    const targetUSD = {
-      BTC: (currentAllocation.BTC / 100) * totalUSD,
-      ETH: (currentAllocation.ETH / 100) * totalUSD,
-      SOL: (currentAllocation.SOL / 100) * totalUSD,
-    };
-
-    const deltas = { BTC: targetUSD.BTC - btcVal, ETH: targetUSD.ETH - ethVal, SOL: targetUSD.SOL - solVal };
-    for (const [coin, delta] of Object.entries(deltas)) {
-      if (delta > 10) swaps.push({ action: "BUY", asset: coin, amount: (delta / prices[coin as keyof typeof prices]).toFixed(4), value: delta.toFixed(0) });
-      else if (delta < -10) swaps.push({ action: "SELL", asset: coin, amount: (Math.abs(delta) / prices[coin as keyof typeof prices]).toFixed(4), value: Math.abs(delta).toFixed(0) });
-    }
-    setRebalanceResult(swaps);
-  };
-
-  const triggerRebalanceSimulation = () => {
-    setIsRebalancing(true);
-    setTimeout(() => {
-      setIsRebalancing(false);
-      setRebalanceResult(null);
-      toast({ title: "Rebalance Complete", description: "Simulated orders routed through SoDEX Liquidity Router." });
-    }, 2000);
-  };
-
   // ─── Handle Fetch Wallet ─────────────────────────────────────────────────
   const handleFetchWallet = () => {
-    if (useDemoData) {
-      setActiveAddress("0x3538f0e0e8bc3b379ed3c5b9dc6deb236339bad0");
-      toast({ title: "Switched to Demo Wallet", description: "Loaded historical SoDEX trade history for demo wallet address." });
-      return;
-    }
-
-    if (!walletInput.trim() || !walletInput.startsWith("0x")) {
+    if (dataMode === "demo") return;
+    if (!/^0x[a-fA-F0-9]{40}$/.test(walletInput.trim())) {
       toast({ title: "Invalid Address", description: "Please enter a valid EVM address starting with 0x.", variant: "destructive" });
       return;
     }
-
-    setIsFetchingWallet(true);
-    setTimeout(() => {
-      setActiveAddress(walletInput.trim());
-      setIsFetchingWallet(false);
-      toast({ title: "Wallet History Loaded", description: `Fetched SoDEX trade history across time for ${walletInput.slice(0, 8)}...` });
-    }, 1200);
+    setActiveAddress(walletInput.trim());
   };
 
   // ─── Autopsy calculations ──────────────────────────────────────────────
-  const trades = dbTrades.length > 0 ? dbTrades : getDeterministicTrades(activeAddress);
+  const trades = dbTrades;
   
   const filteredTrades = trades.filter((t) => {
     if (filterAsset !== "ALL" && t.asset !== filterAsset) return false;
@@ -533,32 +402,43 @@ export default function SodexLaunchPanel({
     return true;
   });
 
+  const analysisWindowStart = Date.now() - 30 * 86_400_000;
+  const trailingTrades = filteredTrades.filter((trade) => trade.closedAt >= analysisWindowStart);
   const totalTradesCount = filteredTrades.length;
   const netPnl = filteredTrades.reduce((sum, t) => sum + t.pnl, 0);
+  const trailingNetPnl = trailingTrades.reduce((sum, t) => sum + t.pnl, 0);
   const winCount = filteredTrades.filter((t) => t.pnl > 0).length;
   const autopsyWinRate = totalTradesCount > 0 ? (winCount / totalTradesCount) * 100 : 0;
   const expectancy = totalTradesCount > 0 ? netPnl / totalTradesCount : 0;
 
   const grossGains = filteredTrades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
   const grossLosses = Math.abs(filteredTrades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
-  const profitFactor = grossLosses > 0 ? (grossGains / grossLosses) : grossGains;
-  const volume = filteredTrades.reduce((sum, t) => sum + t.amount * t.entryPrice, 0);
-  const feesPaid = volume * 0.0006;
+  const profitFactor = grossLosses > 0 ? (grossGains / grossLosses) : grossGains > 0 ? Infinity : 0;
+  const volume = trailingTrades.reduce((sum, t) => sum + t.amount * t.entryPrice, 0);
+  const feesPaid = filteredTrades.reduce((sum, trade) => sum + (trade.fee ?? 0), 0);
+  const feeCoverage = filteredTrades.length > 0 && filteredTrades.every((trade) => trade.fee !== null);
+  const patterns = findPerformancePatterns(filteredTrades);
+  const worstPattern = patterns.find((pattern) => pattern.expectancy < 0);
+  const bestPattern = [...patterns].reverse().find((pattern) => pattern.expectancy > 0);
 
   // Edge score & grade based on filtered history
   const winRateWeight = (autopsyWinRate / 100) * 40;
   const pfWeight = Math.min(2.5, profitFactor) / 2.5 * 40;
   const pnlWeight = Math.max(-20, Math.min(20, netPnl / 1000));
-  const edgeScore = Math.round(Math.max(10, Math.min(99, winRateWeight + pfWeight + pnlWeight + 20)));
-  const edgeGrade = edgeScore >= 85 ? "Elite Edge" : edgeScore >= 65 ? "Consistent Edge" : edgeScore >= 45 ? "Neutral Edge" : "Bleeding Edge";
+  const scoreEligible = totalTradesCount >= 30;
+  const evidenceAdjustment = Math.min(1, Math.sqrt(totalTradesCount / 100));
+  const edgeScore = scoreEligible ? Math.round(Math.max(0, Math.min(100, (winRateWeight + pfWeight + pnlWeight + 20) * evidenceAdjustment))) : 0;
+  const edgeGrade = !scoreEligible ? "Insufficient evidence" : edgeScore >= 85 ? "Elite Edge" : edgeScore >= 65 ? "Consistent Edge" : edgeScore >= 45 ? "Neutral Edge" : "Bleeding Edge";
+  const coverage = walletSnapshot ? getDataCoverage(walletSnapshot) : null;
 
   const getEquityChartData = () => {
-    let baseEquity = 10000;
-    let baseCounterfactual = 10000;
-    const chartPoints: any[] = [];
+    let baseEquity = 0;
+    let baseCounterfactual = 0;
+    const chartPoints: { name: string; Realized: number; Counterfactual: number }[] = [];
     trades.forEach((t) => {
       baseEquity += t.pnl;
-      const isWorstPattern = t.asset === "SOL" && t.regime === "bearish";
+      const timeBucket = t.hour >= 20 || t.hour < 5 ? "UTC night" : "UTC day";
+      const isWorstPattern = worstPattern?.label === `${t.asset} ${t.side} · ${timeBucket}`;
       const isMatchingActiveFilter = (filterAsset !== "ALL" && t.asset === filterAsset) || (filterRegime !== "ALL" && t.regime === filterRegime);
       const shouldSkip = excludeWorstPattern ? isWorstPattern : isMatchingActiveFilter;
       if (!shouldSkip) baseCounterfactual += t.pnl;
@@ -611,33 +491,27 @@ export default function SodexLaunchPanel({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <UserCheck size={14} style={{ color: C.accent }} />
-            <span className="text-xs font-bold text-white">Target Profile Data Source</span>
+            <span className="text-xs font-bold text-white">SoDEX Mainnet Profile</span>
           </div>
-          <div className="flex items-center gap-4 text-xs">
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input type="radio" checked={useDemoData} onChange={() => { setUseDemoData(true); setActiveAddress("0x3538f0e0e8bc3b379ed3c5b9dc6deb236339bad0"); }} className="accent-blue-500" />
-              <span style={{ color: useDemoData ? C.textPrimary : C.textMuted }}>Demo Data</span>
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input type="radio" checked={!useDemoData} onChange={() => setUseDemoData(false)} className="accent-blue-500" />
-              <span style={{ color: !useDemoData ? C.textPrimary : C.textMuted }}>Wallet Address</span>
-            </label>
+          <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: C.surface }}>
+            <button onClick={() => switchDataMode("live")} className="px-2 py-1 rounded text-[10px] font-bold" style={{ background: dataMode === "live" ? `${C.success}20` : "transparent", color: dataMode === "live" ? C.success : C.textMuted }}>LIVE</button>
+            <button onClick={() => switchDataMode("demo")} className="px-2 py-1 rounded text-[10px] font-bold" style={{ background: dataMode === "demo" ? `${C.warning}20` : "transparent", color: dataMode === "demo" ? C.warning : C.textMuted }}>DEMO</button>
           </div>
         </div>
 
         <div className="flex gap-2">
           <input
             type="text"
-            placeholder={useDemoData ? "Using Demo Profile (0x3538...bad0)" : "Paste EVM address (0x...)"}
-            disabled={useDemoData}
-            value={useDemoData ? "" : walletInput}
+            placeholder="Paste the SoDEX mainnet wallet address (0x...)"
+            value={walletInput}
+            disabled={dataMode === "demo"}
             onChange={(e) => setWalletInput(e.target.value)}
             className="flex-1 px-3 py-1.5 rounded-xl border text-xs font-mono focus:outline-none transition-all disabled:opacity-50 text-white"
             style={{ background: C.surface, borderColor: C.border }}
           />
           <button
             onClick={handleFetchWallet}
-            disabled={isFetchingWallet}
+            disabled={isFetchingWallet || dataMode === "demo"}
             className="px-4 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all text-white"
             style={{ background: C.accent }}
           >
@@ -646,7 +520,8 @@ export default function SodexLaunchPanel({
           </button>
         </div>
         <p className="text-[10px]" style={{ color: C.textMuted }}>
-          Loaded Profile: <span className="font-mono text-white font-semibold">{activeAddress.slice(0, 12)}...{activeAddress.slice(-8)}</span>
+          {dataMode === "demo" ? "Demo profile — fixture data for workspace exploration only." : activeAddress ? <>Loaded Profile: <span className="font-mono text-white font-semibold">{activeAddress.slice(0, 12)}...{activeAddress.slice(-8)}</span></> : "Connect or enter a wallet to load mainnet data."}
+          {walletSnapshot && <span className="ml-2">· {walletSnapshot.closedPositions.filter((trade) => trade.market === "perps").length} closed perps · {walletSnapshot.spotTrades.length} spot executions · {walletSnapshot.closedPositions.filter((trade) => trade.market === "spot").length} FIFO-matched spot lots · refreshed {new Date(walletSnapshot.fetchedAt).toLocaleTimeString()}</span>}
         </p>
       </div>
 
@@ -658,6 +533,14 @@ export default function SodexLaunchPanel({
               <div className="flex flex-col items-center justify-center py-16 gap-3">
                 <RefreshCw size={20} className="animate-spin" style={{ color: C.accent }} />
                 <p className="text-xs font-semibold" style={{ color: C.textMuted }}>Computing risk metrics from 90-day price history...</p>
+              </div>
+            ) : walletDataError || !walletSnapshot ? (
+              <div className="p-5 rounded-2xl border space-y-2" style={{ background: C.panel, borderColor: `${C.warning}40` }}>
+                <AlertTriangle size={16} style={{ color: C.warning }} />
+                <p className="text-xs font-bold" style={{ color: C.textPrimary }}>No verified portfolio risk calculation is available.</p>
+                <p className="text-[11px] leading-relaxed" style={{ color: C.textSecondary }}>
+                  {walletDataError || "Load a SoDEX mainnet wallet to calculate risk from reported balances, positions, and mainnet candles."}
+                </p>
               </div>
             ) : (
               <>
@@ -856,7 +739,7 @@ export default function SodexLaunchPanel({
                       </select>
                     </div>
                   </div>
-                  <button onClick={runScenario} className="w-full py-2 rounded-xl text-xs font-bold" style={{ background: C.accent, color: "#fff" }}>
+                  <button onClick={runScenario} disabled={Object.keys(currentAllocation).length === 0} className="w-full py-2 rounded-xl text-xs font-bold disabled:opacity-50" style={{ background: C.accent, color: "#fff" }}>
                     Simulate Scenario
                   </button>
                   {scenarioResult && (
@@ -902,52 +785,18 @@ export default function SodexLaunchPanel({
                   </div>
                 )}
 
-                {/* 8. SoDEX Rebalance Simulator */}
-                <div className="p-4 rounded-2xl border space-y-3" style={{ background: C.panel, borderColor: C.border }}>
+                <div className="p-4 rounded-2xl border space-y-2" style={{ background: C.panel, borderColor: C.border }}>
                   <div className="flex items-center gap-2">
-                    <Sliders size={14} style={{ color: C.warning }} />
-                    <p className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>SoDEX Rebalance Simulator</p>
+                    <Shield size={14} style={{ color: C.success }} />
+                    <p className="text-[10px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>Data Integrity</p>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {Object.keys(holdings).map((coin) => (
-                      <div key={coin} className="space-y-1">
-                        <label className="text-[10px] font-bold" style={{ color: C.textMuted }}>{coin}</label>
-                        <input type="text" value={(holdings as any)[coin]}
-                          onChange={(e) => setHoldings({ ...holdings, [coin]: e.target.value })}
-                          className="w-full px-2 py-1.5 rounded-lg border text-white text-xs text-center font-mono focus:outline-none"
-                          style={{ background: C.surface, borderColor: C.border }} />
-                      </div>
-                    ))}
-                  </div>
-                  <button onClick={calculateRebalance} className="w-full py-2 rounded-xl text-xs font-bold" style={{ background: C.accent, color: "#fff" }}>
-                    Calculate Swaps
-                  </button>
-                  {rebalanceResult && (
-                    <div className="p-3 rounded-xl border space-y-2" style={{ background: C.surface, borderColor: C.border }}>
-                      <p className="text-[9px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>Required Orders</p>
-                      {rebalanceResult.length === 0 ? (
-                        <p className="text-center italic text-xs" style={{ color: C.textMuted }}>Portfolio already aligned</p>
-                      ) : (
-                        <div className="space-y-1.5 font-mono text-xs">
-                          {rebalanceResult.map((s: any, i: number) => (
-                            <div key={i} className="flex justify-between items-center border-b pb-1 last:border-b-0" style={{ borderColor: C.border }}>
-                              <span className={s.action === "BUY" ? "text-emerald-400 font-bold" : "text-rose-500 font-bold"}>
-                                {s.action} {s.amount} {s.asset}
-                              </span>
-                              <span style={{ color: C.textMuted }}>~${s.value}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {rebalanceResult.length > 0 && (
-                        <button onClick={triggerRebalanceSimulation} disabled={isRebalancing}
-                          className="w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2"
-                          style={{ background: C.success, color: "#fff" }}>
-                          {isRebalancing ? <><RefreshCw size={12} className="animate-spin" /> Simulating...</> : "Execute on SoDEX"}
-                        </button>
-                      )}
-                    </div>
-                  )}
+                  <p className="text-[11px] leading-relaxed" style={{ color: C.textSecondary }}>
+                    This workspace is read-only. It does not simulate trades or create orders; every displayed balance, position, PnL, and risk measure is derived from the loaded SoDEX mainnet account and market data.
+                  </p>
+                  {coverage && <div className="pt-2 border-t text-[10px] space-y-1" style={{ borderColor: C.border, color: C.textMuted }}>
+                    <p><span className="font-bold text-white">Coverage: </span>{coverage.completeness.toUpperCase()} · {coverage.perpsClosedPositions} perps closures · {coverage.perpsExecutions} perps executions · {coverage.spotExecutions} spot executions · {coverage.matchedSpotLots} matched spot lots · {coverage.openOrders} order records.</p>
+                    <p>{coverage.note}</p>
+                  </div>}
                 </div>
               </>
             )}
@@ -1003,14 +852,14 @@ export default function SodexLaunchPanel({
                   <span className="text-[15px] font-black text-white font-mono mt-1">${(volume / 1000000).toFixed(2)}M</span>
                 </div>
                 <div className="p-3 rounded-xl border flex flex-col justify-between" style={{ background: C.surface, borderColor: C.border }}>
-                  <span style={{ color: C.textMuted }}>SoDEX 30D PNL</span>
+                  <span style={{ color: C.textMuted }}>Verified 30D PNL</span>
                   <span className="text-[15px] font-black font-mono mt-1" style={{ color: netPnl >= 0 ? C.success : C.danger }}>
-                    {netPnl >= 0 ? "+" : ""}${netPnl.toLocaleString()}
+                    {trailingNetPnl >= 0 ? "+" : ""}${trailingNetPnl.toLocaleString()}
                   </span>
                 </div>
                 <div className="p-3 rounded-xl border flex flex-col justify-between" style={{ background: C.surface, borderColor: C.border }}>
                   <span style={{ color: C.textMuted }}>Profit Factor</span>
-                  <span className="text-[15px] font-black text-white font-mono mt-1">{profitFactor.toFixed(2)}</span>
+                  <span className="text-[15px] font-black text-white font-mono mt-1">{Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : "Not measurable"}</span>
                 </div>
                 <div className="p-3 rounded-xl border flex flex-col justify-between" style={{ background: C.surface, borderColor: C.border }}>
                   <span style={{ color: C.textMuted }}>Win Rate</span>
@@ -1073,15 +922,15 @@ export default function SodexLaunchPanel({
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between items-center p-2.5 rounded-xl border" style={{ background: `${C.danger}05`, borderColor: `${C.danger}15` }}>
                   <span style={{ color: C.textMuted }}>Biggest Leak</span>
-                  <span className="font-bold text-rose-500">SOL Bearish (-$406 / trade)</span>
+                  <span className="font-bold text-rose-500">{worstPattern ? `${worstPattern.label} ($${worstPattern.expectancy.toFixed(2)} / trade)` : "Insufficient verified realized-history"}</span>
                 </div>
                 <div className="flex justify-between items-center p-2.5 rounded-xl border" style={{ background: `${C.success}05`, borderColor: `${C.success}15` }}>
                   <span style={{ color: C.textMuted }}>Best Edge</span>
-                  <span className="font-bold text-emerald-400">BTC Bullish (+$300 / trade)</span>
+                  <span className="font-bold text-emerald-400">{bestPattern ? `${bestPattern.label} (+$${bestPattern.expectancy.toFixed(2)} / trade)` : "Insufficient verified realized-history"}</span>
                 </div>
                 <div className="flex justify-between items-center p-2.5 rounded-xl border" style={{ background: C.surface, borderColor: C.border }}>
-                  <span style={{ color: C.textMuted }}>Exchange Fees Paid</span>
-                  <span className="font-bold font-mono text-white">-${feesPaid.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                  <span style={{ color: C.textMuted }}>Reported Exchange Fees</span>
+                  <span className="font-bold font-mono text-white">{feeCoverage ? `-$${feesPaid.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "Not reported by source"}</span>
                 </div>
               </div>
             </div>
@@ -1093,12 +942,12 @@ export default function SodexLaunchPanel({
                 <div>
                   <h4 className="text-xs font-bold" style={{ color: C.danger }}>Performance Leak Exclusions</h4>
                   <p className="text-[10px] leading-relaxed mt-1" style={{ color: C.textSecondary }}>
-                    Avoid trading SOL during bearish conditions to recover your biggest leak and lift overall returns.
+                    {worstPattern ? `Counterfactual analysis excludes the observed ${worstPattern.label} setup; it is based only on verified perps closures and FIFO-matched spot disposal lots.` : "A counterfactual is unavailable until the mainnet account has at least two comparable verified realized lots."}
                   </p>
                 </div>
               </div>
               <div className="pt-2 border-t flex items-center justify-between" style={{ borderColor: `${C.danger}10` }}>
-                <span className="text-[10px]" style={{ color: C.textMuted }}>Simulate Skip SOL Bearish:</span>
+                <span className="text-[10px]" style={{ color: C.textMuted }}>Exclude largest observed loss setup:</span>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input type="checkbox" checked={excludeWorstPattern} onChange={(e) => setExcludeWorstPattern(e.target.checked)} className="sr-only peer" />
                   <div className="w-7 h-4 bg-neutral-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -1147,14 +996,14 @@ export default function SodexLaunchPanel({
 
       {/* Footer */}
       <div className="sticky bottom-0 px-5 pb-5 pt-3 space-y-2 border-t" style={{ background: C.bg, borderColor: C.border }}>
-        <button onClick={() => window.open("https://testnet.sodex.com", "_blank", "noopener,noreferrer")}
+        <button onClick={() => window.open("https://sodex.com", "_blank", "noopener,noreferrer")}
           className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold border hover:opacity-95"
           style={{ background: C.accent, borderColor: C.accent, color: "#FFFFFF" }}>
           <ExternalLink size={13} />
-          Open SoDEX Testnet
+          Open SoDEX Mainnet
         </button>
         <p className="text-center text-[10px]" style={{ color: C.textMuted }}>
-          Testnet Mode — Risk Engine & Performance Autopsy — DefiScope AI
+          Mainnet read-only mode · Risk Engine & Performance Autopsy · DefiScope AI
         </p>
       </div>
     </div>

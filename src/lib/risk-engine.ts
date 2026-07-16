@@ -6,6 +6,8 @@
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+import { supabase } from "@/integrations/supabase/client";
+
 export interface DailyReturn {
   date: string;
   returns: Record<string, number>; // asset symbol → daily log return
@@ -710,209 +712,415 @@ export async function fetchDailyReturns(
 
 export interface ClosedPosition {
   id: string;
-  asset: "BTC" | "ETH" | "SOL";
+  market: "perps" | "spot";
+  asset: string;
   side: "BUY" | "SELL";
   entryPrice: number;
   exitPrice: number;
   amount: number;
   pnl: number;
+  fee: number | null;
   regime: "bullish" | "bearish" | "chop";
   hour: number;
   date: string;
+  closedAt: number;
 }
 
-export function getDeterministicTrades(address: string): ClosedPosition[] {
-  let hash = 0;
-  for (let i = 0; i < address.length; i++) {
-    hash = address.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  
-  const rng = (seed: number) => {
-    const x = Math.sin(seed) * 10000;
-    return x - Math.floor(x);
-  };
-  
-  let seed = Math.abs(hash);
-  const trades: ClosedPosition[] = [];
-  const assets: ("BTC" | "ETH" | "SOL")[] = ["BTC", "ETH", "SOL"];
-  const regimes: ("bullish" | "bearish" | "chop")[] = ["bullish", "bearish", "chop"];
-  
-  const numTrades = 15;
-  const basePrice = { BTC: 64000, ETH: 3200, SOL: 140 };
-  
-  for (let i = 0; i < numTrades; i++) {
-    const asset = assets[Math.floor(rng(seed + i * 7) * 3)];
-    const side = rng(seed + i * 13) > 0.4 ? "BUY" : "SELL";
-    const regime = regimes[Math.floor(rng(seed + i * 19) * 3)];
-    const hour = Math.floor(rng(seed + i * 29) * 24);
-    
-    const entryPrice = basePrice[asset] * (0.95 + rng(seed + i * 31) * 0.1);
-    
-    let isWin = rng(seed + i * 43) > 0.45;
-    if (asset === "SOL" && regime === "bearish") {
-      isWin = false;
-    }
-    if (hour >= 20 || hour <= 4) {
-      isWin = rng(seed + i * 47) > 0.65;
-    }
-    
-    const pctChange = (0.01 + rng(seed + i * 59) * 0.07) * (isWin ? 1 : -1.2);
-    const exitPrice = entryPrice * (1 + pctChange);
-    
-    const amount = asset === "BTC" ? 0.05 + rng(seed + i * 67) * 0.15 
-                 : asset === "ETH" ? 0.5 + rng(seed + i * 71) * 2.0
-                 : 5 + rng(seed + i * 73) * 25.0;
-                 
-    const pnl = Math.round(amount * (exitPrice - entryPrice) * (side === "BUY" ? 1 : -1));
-    
-    const day = 10 + Math.floor(rng(seed + i * 79) * 20);
-    const date = `Jun ${day < 10 ? '0' + day : day}`;
-    
-    trades.push({
-      id: `${i + 1}`,
-      asset,
-      side,
-      entryPrice: Math.round(entryPrice),
-      exitPrice: Math.round(exitPrice),
-      amount: parseFloat(amount.toFixed(3)),
-      pnl,
-      regime,
-      hour,
-      date,
-    });
-  }
-  
-  return trades.sort((a, b) => a.date.localeCompare(b.date));
+export interface MainnetWalletSnapshot {
+  source: "mainnet" | "demo";
+  address: string;
+  balances: Record<string, unknown>[];
+  spotBalances: Record<string, unknown>[];
+  openPositions: Record<string, unknown>[];
+  openOrders: Record<string, unknown>[];
+  closedPositions: ClosedPosition[];
+  trades: Record<string, unknown>[];
+  spotTrades: Record<string, unknown>[];
+  fundingPayments: Record<string, unknown>[];
+  fetchedAt: string;
+  errors: string[];
 }
 
-export function getDeterministicPortfolio(address: string): Record<string, number> {
-  let hash = 0;
-  for (let i = 0; i < address.length; i++) {
-    hash = address.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  
-  const rng = (seed: number) => {
-    const x = Math.sin(seed) * 10000;
-    return x - Math.floor(x);
-  };
-  
-  let seed = Math.abs(hash);
-  const btcWeight = 10 + Math.floor(rng(seed + 1) * 50);
-  const ethWeight = 10 + Math.floor(rng(seed + 2) * 30);
-  const solWeight = 5 + Math.floor(rng(seed + 3) * 25);
-  const usdcWeight = Math.max(5, 100 - (btcWeight + ethWeight + solWeight));
-  
-  const total = btcWeight + ethWeight + solWeight + usdcWeight;
-  
-  return {
-    BTC: Math.round((btcWeight / total) * 100),
-    ETH: Math.round((ethWeight / total) * 100),
-    SOL: Math.round((solWeight / total) * 100),
-    USDC: Math.round((usdcWeight / total) * 100),
-  };
+export interface LedgerEvent {
+  id: string;
+  market: "spot" | "perps";
+  type: "trade" | "closed_position" | "funding" | "open_order";
+  timestamp: number;
+  asset: string;
+  source: string;
 }
 
-export async function fetchWalletHistoryFromScan(address: string): Promise<ClosedPosition[]> {
-  try {
-    const mainnetUrl = `https://mainnet-gw.sodex.dev/api/v1/perps/accounts/${address}/positions/history?limit=100`;
-    const testnetUrl = `https://testnet-gw.sodex.dev/api/v1/perps/accounts/${address}/positions/history?limit=100`;
+export interface DataCoverage {
+  perpsClosedPositions: number;
+  perpsExecutions: number;
+  spotExecutions: number;
+  matchedSpotLots: number;
+  openOrders: number;
+  sourceErrors: number;
+  completeness: "complete" | "partial" | "unavailable";
+  note: string;
+}
 
-    const [mainnetRes, testnetRes] = await Promise.all([
-      fetch(mainnetUrl).then(r => r.json()).catch(() => null),
-      fetch(testnetUrl).then(r => r.json()).catch(() => null)
-    ]);
+export interface PerformancePattern {
+  label: string;
+  trades: number;
+  netPnl: number;
+  expectancy: number;
+  winRate: number;
+}
 
-    const rawPositions: any[] = [];
-    if (mainnetRes && mainnetRes.code === 0 && Array.isArray(mainnetRes.data)) {
-      rawPositions.push(...mainnetRes.data);
-    }
-    if (testnetRes && testnetRes.code === 0 && Array.isArray(testnetRes.data)) {
-      rawPositions.push(...testnetRes.data);
-    }
+const SODEX_MAINNET_PERPS = "https://mainnet-gw.sodex.dev/api/v1/perps";
+const SODEX_MAINNET_SPOT = "https://mainnet-gw.sodex.dev/api/v1/spot";
 
-    if (rawPositions.length > 0) {
-      const sorted = rawPositions
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-        .slice(0, 50);
+function numberValue(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(String(value ?? ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
-      return sorted.map((p: any, idx: number) => {
-        const symbolStr = p.symbol || "BTC-USD";
-        const asset = symbolStr.split("-")[0].toUpperCase() as "BTC" | "ETH" | "SOL";
-        const side = p.side === "LONG" || p.positionSide === "LONG" ? "BUY" : "SELL";
-        const dateObj = new Date(p.createdAt || Date.now());
-        
-        return {
-          id: p.id || String(p.createdAt || idx),
-          asset: (["BTC", "ETH", "SOL"].includes(asset) ? asset : "BTC") as any,
-          side,
-          entryPrice: parseFloat(p.avgEntryPrice || p.entryPrice || 0),
-          exitPrice: parseFloat(p.avgClosePrice || p.closePrice || 0),
-          amount: parseFloat(p.size || 0),
-          pnl: Math.round(parseFloat(p.realizedPnL || p.pnl || 0)),
-          regime: (parseFloat(p.realizedPnL || 0) >= 0) ? "bullish" : "bearish",
-          hour: dateObj.getHours(),
-          date: dateObj.toLocaleDateString([], { month: "short", day: "numeric" }),
-        };
-      });
-    }
+function firstNumber(record: Record<string, unknown>, keys: string[]): number {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null && record[key] !== "") return numberValue(record[key]);
+  }
+  return 0;
+}
 
-    // 3. Fallback to normal blockchain scanners if SoDEX is empty
-    const bsUrl = `https://api.basescan.org/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=30&sort=desc`;
-    const esUrl = `https://api.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&page=1&offset=30&sort=desc`;
+function firstText(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    if (typeof record[key] === "string" && record[key]) return record[key];
+  }
+  return "";
+}
 
-    const [esRes, bsRes] = await Promise.all([
-      fetch(esUrl).then(r => r.json()).catch(() => null),
-      fetch(bsUrl).then(r => r.json()).catch(() => null)
-    ]);
-
-    const txs: any[] = [];
-    if (bsRes?.status === "1" && Array.isArray(bsRes.result)) txs.push(...bsRes.result);
-    if (esRes?.status === "1" && Array.isArray(esRes.result)) txs.push(...esRes.result);
-
-    if (txs.length > 0) {
-      const sortedTxs = txs
-        .sort((a, b) => (parseInt(b.timeStamp) || 0) - (parseInt(a.timeStamp) || 0))
-        .slice(0, 30);
-
-      return sortedTxs.map((tx: any, idx: number) => {
-        const timeSec = parseInt(tx.timeStamp) || Math.floor(Date.now() / 1000);
-        const dateObj = new Date(timeSec * 1000);
-        const rawValue = parseFloat(tx.value) || 0;
-        const amount = rawValue / 1e18;
-        const isOutbound = tx.from.toLowerCase() === address.toLowerCase();
-        const side = isOutbound ? "SELL" : "BUY";
-
-        let asset: "BTC" | "ETH" | "SOL" = "ETH";
-        if (tx.to && tx.input && tx.input !== "0x") {
-          const hashChar = tx.hash.charCodeAt(4) || 0;
-          asset = hashChar % 3 === 0 ? "BTC" : hashChar % 3 === 1 ? "SOL" : "ETH";
-        }
-
-        const gasUsed = parseFloat(tx.gasUsed) || 0;
-        const gasPrice = parseFloat(tx.gasPrice) || 0;
-        const feeEth = (gasUsed * gasPrice) / 1e18;
-
-        const isSuccess = tx.isError === "0";
-        const pnl = isSuccess
-          ? Math.round((amount * 120 - feeEth * 3200) * (isOutbound ? -1 : 1))
-          : Math.round(-feeEth * 3200);
-
-        return {
-          id: tx.hash.slice(0, 10),
-          asset,
-          side,
-          entryPrice: asset === "BTC" ? 64000 : asset === "SOL" ? 140 : 3200,
-          exitPrice: asset === "BTC" ? 65200 : asset === "SOL" ? 138 : 3280,
-          amount: amount > 0 ? parseFloat(amount.toFixed(4)) : 0.05,
-          pnl: pnl !== 0 ? pnl : isSuccess ? 50 : -20,
-          regime: isSuccess ? "bullish" : "bearish",
-          hour: dateObj.getHours(),
-          date: dateObj.toLocaleDateString([], { month: "short", day: "numeric" }),
-        };
-      });
-    }
-  } catch (err) {
-    console.warn("Error fetching wallet history from APIs:", err);
+function recordsFromEnvelope(payload: unknown): Record<string, unknown>[] {
+  if (!payload || typeof payload !== "object") return [];
+  const data = (payload as { data?: unknown }).data;
+  if (Array.isArray(data)) return data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  if (data && typeof data === "object") {
+    const nested = (data as { list?: unknown; rows?: unknown; items?: unknown; balances?: unknown; positions?: unknown; orders?: unknown }).list
+      ?? (data as { rows?: unknown }).rows
+      ?? (data as { items?: unknown }).items
+      ?? (data as { balances?: unknown }).balances
+      ?? (data as { positions?: unknown }).positions
+      ?? (data as { orders?: unknown }).orders;
+    if (Array.isArray(nested)) return nested.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+    return [data as Record<string, unknown>];
   }
   return [];
+}
+
+function normalizeAsset(value: string): string {
+  const raw = value.toUpperCase().replace(/^V/, "").split(/[-_/]/)[0];
+  return raw === "WETH" ? "ETH" : raw === "WBTC" || raw === "CBBTC" ? "BTC" : raw;
+}
+
+function normalizeTimestamp(value: unknown): number {
+  const parsed = numberValue(value);
+  if (!parsed) return Date.now();
+  return parsed < 10_000_000_000 ? parsed * 1000 : parsed;
+}
+
+function mapClosedPosition(record: Record<string, unknown>, index: number): ClosedPosition {
+  const entryPrice = firstNumber(record, ["avgEntryPrice", "entryPrice", "openPrice", "avgOpenPrice"]);
+  const exitPrice = firstNumber(record, ["avgClosePrice", "closePrice", "exitPrice", "avgExitPrice"]);
+  const pnl = firstNumber(record, ["realizedPnL", "realizedPnl", "pnl", "closedPnl"]);
+  const timestamp = normalizeTimestamp(firstNumber(record, ["closedAt", "closeTime", "updatedAt", "createdAt", "time"]));
+  const sideText = firstText(record, ["side", "positionSide", "direction"]).toUpperCase();
+  const side: "BUY" | "SELL" = sideText === "SHORT" || sideText === "SELL" ? "SELL" : "BUY";
+  const move = entryPrice > 0 && exitPrice > 0 ? (exitPrice - entryPrice) / entryPrice : 0;
+  const regime: ClosedPosition["regime"] = move > 0.002 ? "bullish" : move < -0.002 ? "bearish" : "chop";
+
+  return {
+    id: firstText(record, ["id", "positionID", "positionId", "orderID", "orderId"]) || `${timestamp}-${index}`,
+    market: "perps",
+    asset: normalizeAsset(firstText(record, ["symbol", "asset", "coin"])),
+    side,
+    entryPrice,
+    exitPrice,
+    amount: firstNumber(record, ["size", "quantity", "qty", "closedSize"]),
+    pnl,
+    fee: record.fee === undefined && record.fees === undefined ? null : firstNumber(record, ["fee", "fees", "tradingFee"]),
+    regime,
+    hour: new Date(timestamp).getUTCHours(),
+    date: new Date(timestamp).toISOString().slice(0, 10),
+    closedAt: timestamp,
+  };
+}
+
+/**
+ * Converts spot executions into realized FIFO disposal lots only. An unmatched
+ * sale is deliberately omitted: an incomplete history must never become an
+ * invented cost basis or PnL figure.
+ */
+function mapSpotExecutionsToClosedLots(executions: Record<string, unknown>[]): ClosedPosition[] {
+  type Lot = { amount: number; price: number; fee: number; timestamp: number };
+  const inventories = new Map<string, Lot[]>();
+  const result: ClosedPosition[] = [];
+  const chronological = executions.map((record, index) => ({ record, index, timestamp: normalizeTimestamp(firstNumber(record, ["executedAt", "tradeTime", "createdAt", "updatedAt", "time", "timestamp"])) }))
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  for (const { record, index, timestamp } of chronological) {
+    const asset = normalizeAsset(firstText(record, ["symbol", "market", "pair", "instrument", "baseAsset", "baseCoin"]));
+    const sideText = firstText(record, ["side", "direction", "orderSide"]).toUpperCase();
+    const side: "BUY" | "SELL" = sideText === "SELL" ? "SELL" : "BUY";
+    const amount = Math.abs(firstNumber(record, ["executedQty", "filledQty", "quantity", "qty", "size", "baseQuantity"]));
+    const price = firstNumber(record, ["price", "avgPrice", "executionPrice", "fillPrice"]);
+    const rawFee = firstNumber(record, ["fee", "fees", "tradingFee", "commission"]);
+    const feeCoin = normalizeAsset(firstText(record, ["feeCoin", "feeAsset", "commissionAsset"]));
+    // Express reported spot fees in the quote currency only when conversion is
+    // unambiguous at the execution price. Unknown fee currencies are not used.
+    const fee = feeCoin === asset ? rawFee * price : feeCoin === "USDC" || feeCoin === "USDT" || feeCoin === "USD" ? rawFee : 0;
+    if (!asset || amount <= 0 || price <= 0) continue;
+    const inventory = inventories.get(asset) || [];
+    if (side === "BUY") {
+      inventory.push({ amount, price, fee, timestamp });
+      inventories.set(asset, inventory);
+      continue;
+    }
+    let remaining = amount;
+    while (remaining > 1e-12 && inventory.length > 0) {
+      const opening = inventory[0];
+      const matched = Math.min(remaining, opening.amount);
+      const allocatedOpenFee = opening.fee * (matched / opening.amount);
+      const allocatedCloseFee = fee * (matched / amount);
+      const pnl = (price - opening.price) * matched - allocatedOpenFee - allocatedCloseFee;
+      const move = (price - opening.price) / opening.price;
+      result.push({
+        id: firstText(record, ["id", "tradeId", "executionId", "orderId"]) + `-lot-${index}-${result.length}`,
+        market: "spot", asset, side: "BUY", entryPrice: opening.price, exitPrice: price, amount: matched, pnl,
+        fee: allocatedOpenFee + allocatedCloseFee,
+        regime: move > 0.002 ? "bullish" : move < -0.002 ? "bearish" : "chop",
+        hour: new Date(timestamp).getUTCHours(), date: new Date(timestamp).toISOString().slice(0, 10), closedAt: timestamp,
+      });
+      opening.amount -= matched;
+      remaining -= matched;
+      if (opening.amount <= 1e-12) inventory.shift();
+    }
+  }
+  return result;
+}
+
+async function fetchMainnet(path: string, market: "perps" | "spot" = "perps"): Promise<unknown> {
+  const response = await fetch(`${market === "spot" ? SODEX_MAINNET_SPOT : SODEX_MAINNET_PERPS}${path}`, { headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(`SoDEX mainnet returned ${response.status} for ${path}`);
+  const payload = await response.json();
+  if (payload?.code !== undefined && payload.code !== 0) throw new Error(payload.error || `SoDEX mainnet rejected ${path}`);
+  return payload;
+}
+
+/**
+ * Reads public, mainnet-only SoDEX account data. No testnet, explorers, hash
+ * seeding, or price/PnL estimation is used anywhere in this path.
+ */
+export async function fetchMainnetWalletSnapshot(address: string): Promise<MainnetWalletSnapshot> {
+  if (!/^0x[a-fA-F0-9]{40}$/.test(address)) throw new Error("Enter a valid EVM wallet address.");
+  const encodedAddress = encodeURIComponent(address.toLowerCase());
+  const endpoints = {
+    state: `/accounts/${encodedAddress}/state`,
+    balances: `/accounts/${encodedAddress}/balances`,
+    positions: `/accounts/${encodedAddress}/positions`,
+    history: `/accounts/${encodedAddress}/positions/history?limit=500`,
+    trades: `/accounts/${encodedAddress}/trades?limit=1000`,
+    fundings: `/accounts/${encodedAddress}/fundings?limit=1000`,
+    spotState: `/accounts/${encodedAddress}/state`,
+    spotBalances: `/accounts/${encodedAddress}/balances`,
+    // SoDEX spot account history currently rejects a `limit` parameter.
+    spotOrders: `/accounts/${encodedAddress}/orders/history`,
+    spotTrades: `/accounts/${encodedAddress}/trades`,
+  };
+  // The edge gateway avoids browser CORS limits after deployment. Local development
+  // retains the exact same public, mainnet-only read if that function is absent.
+  const gateway = await supabase.functions.invoke("sodex-mainnet-account", { body: { address } }).catch(() => ({ data: null }));
+  const gatewayPayload = gateway.data && typeof gateway.data === "object"
+    ? (gateway.data as { data?: Record<string, unknown> }).data
+    : undefined;
+  const entries = gatewayPayload
+    ? Object.entries({
+        state: gatewayPayload.state,
+        balances: gatewayPayload.balances,
+        positions: gatewayPayload.positions,
+        history: gatewayPayload.closedPositions,
+        trades: gatewayPayload.trades,
+        fundings: gatewayPayload.fundingPayments,
+        spotState: gatewayPayload.spotState,
+        spotBalances: gatewayPayload.spotBalances,
+        spotOrders: gatewayPayload.spotOrders,
+        spotTrades: gatewayPayload.spotTrades,
+      }).map(([name, payload]) => ({ status: "fulfilled" as const, value: [name, payload] as const }))
+    : await Promise.allSettled(Object.entries(endpoints).map(async ([name, path]) => [name, await fetchMainnet(path, name.startsWith("spot") ? "spot" : "perps")] as const));
+  const payloads: Record<string, unknown> = {};
+  const errors: string[] = [];
+  for (const entry of entries) {
+    if (entry.status === "fulfilled") payloads[entry.value[0]] = entry.value[1];
+    else errors.push(entry.reason instanceof Error ? entry.reason.message : "Mainnet request failed");
+  }
+  if (!payloads.history && !payloads.trades && !payloads.spotTrades && !payloads.state && !payloads.spotState) throw new Error(errors[0] || "Unable to reach the SoDEX mainnet account API.");
+
+  const state = recordsFromEnvelope(payloads.state)[0] ?? {};
+  const balances = recordsFromEnvelope(payloads.balances).length > 0
+    ? recordsFromEnvelope(payloads.balances)
+    : recordsFromEnvelope((state as { balances?: unknown }).balances ? { data: (state as { balances?: unknown }).balances } : null);
+  const openPositions = recordsFromEnvelope(payloads.positions).length > 0
+    ? recordsFromEnvelope(payloads.positions)
+    : recordsFromEnvelope((state as { positions?: unknown }).positions ? { data: (state as { positions?: unknown }).positions } : null);
+  const rawHistory = recordsFromEnvelope(payloads.history);
+  const spotState = recordsFromEnvelope(payloads.spotState)[0] ?? {};
+  const spotBalances = recordsFromEnvelope(payloads.spotBalances).length > 0
+    ? recordsFromEnvelope(payloads.spotBalances)
+    : recordsFromEnvelope((spotState as { balances?: unknown }).balances ? { data: (spotState as { balances?: unknown }).balances } : null);
+  const spotTrades = recordsFromEnvelope(payloads.spotTrades);
+
+  return {
+    source: "mainnet",
+    address: address.toLowerCase(),
+    balances,
+    spotBalances,
+    openPositions,
+    openOrders: [...recordsFromEnvelope(payloads.spotOrders)],
+    closedPositions: [...rawHistory.map(mapClosedPosition).filter((position) => position.asset.length > 0), ...mapSpotExecutionsToClosedLots(spotTrades)],
+    trades: recordsFromEnvelope(payloads.trades),
+    spotTrades,
+    fundingPayments: recordsFromEnvelope(payloads.fundings),
+    fetchedAt: new Date().toISOString(),
+    errors,
+  };
+}
+
+/** Clearly labelled fixture data for product walkthroughs. Never used by live mode. */
+export function createDemoWalletSnapshot(): MainnetWalletSnapshot {
+  const now = Date.now();
+  const makePosition = (index: number, asset: string, side: "BUY" | "SELL", pnl: number, entryPrice: number, exitPrice: number, amount: number): ClosedPosition => ({
+    id: `demo-${index}`,
+    market: "perps",
+    asset,
+    side,
+    entryPrice,
+    exitPrice,
+    amount,
+    pnl,
+    fee: Math.abs(amount * entryPrice) * 0.0004,
+    regime: exitPrice > entryPrice ? "bullish" : "bearish",
+    hour: index % 2 === 0 ? 14 : 22,
+    date: new Date(now - (6 - index) * 86_400_000).toISOString().slice(0, 10),
+    closedAt: now - (6 - index) * 86_400_000,
+  });
+  return {
+    source: "demo",
+    address: "demo-profile",
+    balances: [
+      { asset: "BTC", amount: "0.18", usdValue: 11700 },
+      { asset: "ETH", amount: "1.4", usdValue: 4900 },
+      { asset: "USDC", amount: "3400", usdValue: 3400 },
+    ],
+    spotBalances: [],
+    openPositions: [],
+    openOrders: [],
+    closedPositions: [
+      makePosition(1, "BTC", "BUY", 180, 63000, 64000, 0.18),
+      makePosition(2, "ETH", "BUY", -120, 3500, 3414, 1.4),
+      makePosition(3, "BTC", "BUY", 210, 63500, 64667, 0.18),
+      makePosition(4, "ETH", "SELL", -145, 3450, 3554, 1.4),
+      makePosition(5, "BTC", "BUY", 165, 64000, 64917, 0.18),
+      makePosition(6, "ETH", "SELL", 105, 3520, 3445, 1.4),
+    ],
+    trades: [],
+    spotTrades: [],
+    fundingPayments: [],
+    fetchedAt: new Date().toISOString(),
+    errors: [],
+  };
+}
+
+/** A source-traceable, normalized account event view for UI and AI explanations. */
+export function buildAccountLedger(snapshot: MainnetWalletSnapshot): LedgerEvent[] {
+  const events: LedgerEvent[] = [
+    ...snapshot.closedPositions.map((position) => ({ id: position.id, market: position.market, type: position.market === "spot" ? "trade" as const : "closed_position" as const, timestamp: position.closedAt, asset: position.asset, source: position.market === "spot" ? "spot/accounts/{address}/trades (FIFO matched)" : "perps/accounts/{address}/positions/history" })),
+    ...snapshot.trades.map((trade, index) => ({ id: firstText(trade, ["tradeID", "tradeId", "id"]) || `perps-trade-${index}`, market: "perps" as const, type: "trade" as const, timestamp: normalizeTimestamp(firstNumber(trade, ["time", "createdAt", "updatedAt"])), asset: normalizeAsset(firstText(trade, ["symbol", "asset", "coin"])), source: "perps/accounts/{address}/trades" })),
+    ...snapshot.spotTrades.map((trade, index) => ({ id: firstText(trade, ["tradeID", "tradeId", "id"]) || `spot-trade-${index}`, market: "spot" as const, type: "trade" as const, timestamp: normalizeTimestamp(firstNumber(trade, ["time", "createdAt", "updatedAt"])), asset: normalizeAsset(firstText(trade, ["symbol", "asset", "coin"])), source: "spot/accounts/{address}/trades" })),
+    ...snapshot.openOrders.map((order, index) => ({ id: firstText(order, ["orderID", "orderId", "id"]) || `order-${index}`, market: "spot" as const, type: "open_order" as const, timestamp: normalizeTimestamp(firstNumber(order, ["createdAt", "time", "updatedAt"])), asset: normalizeAsset(firstText(order, ["symbol", "asset", "coin"])), source: "spot/accounts/{address}/orders/history" })),
+  ];
+  return events.sort((a, b) => b.timestamp - a.timestamp);
+}
+
+export function getDataCoverage(snapshot: MainnetWalletSnapshot): DataCoverage {
+  const matchedSpotLots = snapshot.closedPositions.filter((position) => position.market === "spot").length;
+  const unavailable = snapshot.errors.length >= 3;
+  const partial = snapshot.errors.length > 0 || snapshot.spotTrades.length >= 50;
+  return {
+    perpsClosedPositions: snapshot.closedPositions.filter((position) => position.market === "perps").length,
+    perpsExecutions: snapshot.trades.length,
+    spotExecutions: snapshot.spotTrades.length,
+    matchedSpotLots,
+    openOrders: snapshot.openOrders.length,
+    sourceErrors: snapshot.errors.length,
+    completeness: unavailable ? "unavailable" : partial ? "partial" : "complete",
+    note: snapshot.spotTrades.length >= 50 ? "SoDEX returned 50 spot executions; additional historical pages may exist and lifetime results are not assumed." : partial ? "One or more account sources were unavailable; affected metrics are withheld where required." : "All configured mainnet account sources returned successfully for this refresh.",
+  };
+}
+
+/** Converts only reported mainnet balances and positions into percentage weights. */
+export function buildMainnetAllocation(snapshot: MainnetWalletSnapshot, prices: Record<string, number>): Record<string, number> {
+  const values: Record<string, number> = {};
+  const addValue = (asset: string, amount: number, reportedValue: number) => {
+    const symbol = normalizeAsset(asset);
+    const value = reportedValue > 0 ? reportedValue : amount * (prices[symbol] || (symbol === "USDC" || symbol === "USDT" ? 1 : 0));
+    if (value > 0 && Number.isFinite(value)) values[symbol] = (values[symbol] || 0) + value;
+  };
+  for (const balance of [...snapshot.balances, ...snapshot.spotBalances]) {
+    addValue(firstText(balance, ["coin", "asset", "symbol", "coinName"]), firstNumber(balance, ["available", "balance", "total", "amount", "equity"]), firstNumber(balance, ["usdValue", "valueUsd", "notionalUsd", "value"]));
+  }
+  for (const position of snapshot.openPositions) {
+    const asset = firstText(position, ["symbol", "asset", "coin"]);
+    const amount = Math.abs(firstNumber(position, ["size", "quantity", "positionSize"]));
+    const mark = firstNumber(position, ["markPrice", "price", "entryPrice", "avgEntryPrice"]);
+    addValue(asset, amount, firstNumber(position, ["notional", "positionValue", "notionalUsd"]) || amount * mark);
+  }
+  const total = Object.values(values).reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return {};
+  return Object.fromEntries(Object.entries(values).map(([asset, value]) => [asset, (value / total) * 100]));
+}
+
+/** Uses SoDEX mainnet perpetual daily candles, never simulated or exchange-scanner data. */
+export async function fetchMainnetDailyReturns(assets: string[], days = 90): Promise<DailyReturn[]> {
+  const supported = [...new Set(assets.map(normalizeAsset).filter((asset) => asset && asset !== "USDC" && asset !== "USDT"))];
+  const candleSets = await Promise.all(supported.map(async (asset) => {
+    const payload = await fetchMainnet(`/markets/${encodeURIComponent(`${asset}-USD`)}/klines?interval=1d&limit=${Math.min(days, 1000)}`);
+    const rawData = payload && typeof payload === "object" ? (payload as { data?: unknown }).data : null;
+    const rows = Array.isArray(rawData) ? rawData : [];
+    const candles = rows.map((row) => {
+      const record = row && typeof row === "object" && !Array.isArray(row) ? row as Record<string, unknown> : {};
+      const time = Array.isArray(row) ? row[0] : firstNumber(record, ["openTime", "time", "timestamp", "t"]);
+      const close = Array.isArray(row) ? numberValue(row[4]) : firstNumber(record, ["close", "closePrice", "c"]);
+      return { time: normalizeTimestamp(time), close };
+    }).filter((candle) => candle.close > 0).sort((a, b) => a.time - b.time);
+    return { asset, candles };
+  }));
+  const byDate = new Map<string, Record<string, number>>();
+  for (const { asset, candles } of candleSets) {
+    for (let index = 1; index < candles.length; index += 1) {
+      const date = new Date(candles[index].time).toISOString().slice(0, 10);
+      const row = byDate.get(date) || {};
+      row[asset] = Math.log(candles[index].close / candles[index - 1].close);
+      byDate.set(date, row);
+    }
+  }
+  return [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, returns]) => ({ date, returns }));
+}
+
+export function findPerformancePatterns(trades: ClosedPosition[]): PerformancePattern[] {
+  const groups = new Map<string, ClosedPosition[]>();
+  for (const trade of trades) {
+    const bucket = trade.hour >= 20 || trade.hour < 5 ? "UTC night" : "UTC day";
+    const key = `${trade.asset} ${trade.side} · ${bucket}`;
+    groups.set(key, [...(groups.get(key) || []), trade]);
+  }
+  return [...groups.entries()].map(([label, group]) => {
+    const netPnl = group.reduce((sum, trade) => sum + trade.pnl, 0);
+    return {
+      label,
+      trades: group.length,
+      netPnl,
+      expectancy: netPnl / group.length,
+      winRate: (group.filter((trade) => trade.pnl > 0).length / group.length) * 100,
+    };
+  }).filter((pattern) => pattern.trades >= 2).sort((a, b) => a.expectancy - b.expectancy);
 }

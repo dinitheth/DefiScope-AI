@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Loader2, Check, Wrench, Plus, MessageSquare, Trash2, Menu, X, ArrowUp, Wallet, LogOut, ChevronDown, RefreshCw, Bot, BarChart2, Columns2,
+  Loader2, Check, Wrench, Plus, MessageSquare, Trash2, Menu, X, ArrowUp, Wallet, LogOut, ChevronDown, RefreshCw, Bot, BarChart2, Columns2, ShieldCheck, Zap, TrendingUp, TrendingDown, SlidersHorizontal,
 } from "lucide-react";
 
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -29,7 +29,7 @@ import SodexLaunchPanel from "./SodexLaunchPanel";
 import ToolCarousel from "./ai-views/ToolCarousel";
 
 import Typewriter from "./ai-views/Typewriter";
-import { getDeterministicTrades, fetchWalletHistoryFromScan } from "@/lib/risk-engine";
+import { fetchMainnetWalletSnapshot, findPerformancePatterns } from "@/lib/risk-engine";
 import { useChatHistory } from "@/hooks/use-chat-history";
 import {
   checkSosoHealth,
@@ -63,7 +63,13 @@ interface ChatMessage {
   ts?: number;
   animate?: boolean;
   retryText?: string;
+  tradeResult?: SodexTradeResult;
+  agentRecs?: AgentRecommendationData;
 }
+
+type ChatMode = "chat" | "agent";
+type TradeTicketIntent = { asset: "BTC" | "ETH" | "SOL"; side: "BUY" | "SELL"; market: "spot" | "perps"; size?: string; sizePct: number };
+type StrategyTicketIntent = { theme: "FlowPulse Index" | "Risk-Off Rotation" | "Momentum Basket" };
 
 
 
@@ -140,6 +146,7 @@ export default function AiChat() {
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   const [sodexPanelOpen, setSodexPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<"risk" | "autopsy" | "chart">("risk");
+  const [analysisAddress, setAnalysisAddress] = useState<string | null>(null);
   const [now, setNow] = useState(() => formatTime());
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -271,21 +278,35 @@ export default function AiChat() {
     history.saveMessage(convoId, "user", text).catch(() => {});
 
     const lowerText = text.toLowerCase();
-    const isWalletQuery = lowerText.includes("wallet") || lowerText.includes("history") || lowerText.includes("leak") || lowerText.includes("autopsy");
+    const isWalletQuery = lowerText.includes("wallet") || lowerText.includes("history") || lowerText.includes("leak") || lowerText.includes("autopsy") || /0x[a-fA-F0-9]{40}/.test(text);
     
     if (isWalletQuery) {
       setSodexPanelOpen(true);
+      const requestedAddress = text.match(/0x[a-fA-F0-9]{40}/)?.[0];
+      const targetAddress = requestedAddress || wallet.address;
+      if (!targetAddress) {
+        const replyContent = "Connect the SoDEX mainnet wallet you trade with first. DefiScope will not create a profile, score, or leak analysis without a verified wallet address.";
+        setMessages((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: replyContent, animate: true } : message));
+        history.saveMessage(convoId, "assistant", replyContent).catch(() => {});
+        setBusy(false);
+        return;
+      }
       
-      const targetAddress = wallet.address || "0x3538f0e0e8bc3b379ed3c5b9dc6deb236339bad0";
+      setAnalysisAddress(targetAddress);
       const shortAddr = `${targetAddress.slice(0, 6)}...${targetAddress.slice(-4)}`;
       
-      // Fetch real on-chain transaction history dynamically
-      fetchWalletHistoryFromScan(targetAddress).then((scanData) => {
-        let tradesList = scanData;
-        let isSimulated = false;
-        if (!tradesList || tradesList.length === 0) {
-          tradesList = getDeterministicTrades(targetAddress);
-          isSimulated = true;
+      // Read public SoDEX mainnet perps and spot account records only.
+      fetchMainnetWalletSnapshot(targetAddress).then((snapshot) => {
+        const tradesList = snapshot.closedPositions;
+        if (tradesList.length === 0) {
+          const activity = snapshot.spotTrades.length > 0
+            ? `SoDEX mainnet returned **${snapshot.spotTrades.length} spot executions** and no closed perpetual positions. None of the spot sales could be matched to an earlier recorded purchase, so a realized PnL, score, leak, or benchmark would be unverified and has not been generated.`
+            : "SoDEX mainnet returned **no closed perpetual positions and no spot executions** for this wallet. No score, PnL, leak, or benchmark has been generated.";
+          const replyContent = `### SoDEX Mainnet Trade Autopsy: **${shortAddr}**\n\n${activity}`;
+          setMessages((prev) => prev.map((message) => message.id === assistantId ? { ...message, content: replyContent, animate: true } : message));
+          history.saveMessage(convoId, "assistant", replyContent).catch(() => {});
+          setBusy(false);
+          return;
         }
         
         const winCount = tradesList.filter(t => t.pnl > 0).length;
@@ -294,6 +315,7 @@ export default function AiChat() {
         const grossGains = tradesList.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
         const grossLosses = Math.abs(tradesList.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
         const profitFactor = grossLosses > 0 ? (grossGains / grossLosses) : grossGains;
+        const isSimulated = false;
         
         const winRateWeight = (winRate / 100) * 40;
         const pfWeight = Math.min(2.5, profitFactor) / 2.5 * 40;
@@ -333,6 +355,23 @@ ${isSimulated ? `> [!NOTE]\n> **Simulated Profile Loaded**: No direct perpetuals
 *I have opened your trade journal, correlation-adjusted curves, and counterfactual equity curve in the left **Autopsy** workspace tab. Check the "Simulate Skip SOL Bearish" switch to visualize your counterfactual return potential.*`;
         }
         
+        const perpsClosed = tradesList.filter((trade) => trade.market === "perps").length;
+        const spotLots = tradesList.filter((trade) => trade.market === "spot").length;
+        const patterns = findPerformancePatterns(tradesList);
+        const biggestLeak = patterns[0];
+        const bestEdge = patterns.length > 0 ? [...patterns].sort((a, b) => b.expectancy - a.expectancy)[0] : undefined;
+        replyContent = `### SoDEX Mainnet Trade Autopsy: **${shortAddr}**
+
+Verified sources: **SoDEX mainnet perps and spot execution history**. I found **${perpsClosed}** closed perpetual positions, **${snapshot.spotTrades.length}** spot executions, and **${spotLots}** FIFO-matched spot disposal lots.
+
+- **Net realized PnL:** **${netPnlVal >= 0 ? "+" : ""}$${netPnlVal.toLocaleString()}**
+- **Win rate:** **${winRate.toFixed(1)}%**
+- **Profit factor:** **${grossLosses > 0 ? profitFactor.toFixed(2) : "not measurable (no realized losses)"}**
+${biggestLeak ? `- **Largest repeatable loss pattern:** **${biggestLeak.label}**, **$${biggestLeak.expectancy.toFixed(2)}** expected PnL per position over **${biggestLeak.trades}** positions.` : "- A repeatable leak needs at least two comparable verified realized lots; none was inferred."}
+${bestEdge ? `- **Strongest observed pattern:** **${bestEdge.label}**, **+$${bestEdge.expectancy.toFixed(2)}** expected PnL per position over **${bestEdge.trades}** positions.` : ""}
+
+Spot PnL is reported only where a sale can be matched to earlier returned purchase executions using FIFO; unmatched lots are excluded rather than estimated. The Risk Engine uses only the loaded SoDEX mainnet account and SoDEX mainnet market candles. It does not use testnet, seeded wallets, explorers, or synthetic PnL.`;
+
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
@@ -587,7 +626,7 @@ ${isSimulated ? `> [!NOTE]\n> **Simulated Profile Loaded**: No direct perpetuals
                 <img src={logoSrc} alt="DefiScope" width={36} height={36} className="h-9 w-9" />
                 <div className="flex flex-col leading-tight">
                   <span className="text-base font-semibold tracking-tight">DefiScope AI</span>
-                  <span className="text-[10px] uppercase tracking-wider" style={{ color: C.textMuted }}>Testnet</span>
+                  <span className="text-[10px] uppercase tracking-wider" style={{ color: C.textMuted }}>Mainnet analytics</span>
                 </div>
               </div>
               {isMobile && (
@@ -708,8 +747,8 @@ ${isSimulated ? `> [!NOTE]\n> **Simulated Profile Loaded**: No direct perpetuals
                     <span className="absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping" style={{ background: "#10B981", animationDuration: "2s" }} />
                     <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#10B981" }} />
                   </span>
-                  <span className="text-[13px] font-semibold" style={{ color: C.textPrimary }}>SoDEX Testnet</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-md" style={{ background: "#F59E0B20", color: "#F59E0B" }}>Testnet</span>
+                  <span className="text-[13px] font-semibold" style={{ color: C.textPrimary }}>SoDEX Mainnet</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-md" style={{ background: "#10B98120", color: "#10B981" }}>Read-only</span>
                 </div>
                 <button
                   onClick={() => setSodexPanelOpen(false)}
@@ -723,6 +762,7 @@ ${isSimulated ? `> [!NOTE]\n> **Simulated Profile Loaded**: No direct perpetuals
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto">
                 <SodexLaunchPanel
+                  targetAddress={analysisAddress}
                   activeTab={panelTab}
                   onTabChange={setPanelTab}
                   regime={panelRegime}
@@ -753,7 +793,7 @@ ${isSimulated ? `> [!NOTE]\n> **Simulated Profile Loaded**: No direct perpetuals
             <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
               <div className="space-y-6">
                 {messages.length === 0 ? (
-                  <EmptyState time={now} walletAddress={wallet.address} onSend={send} />
+                  <EmptyState time={now} mode="chat" walletAddress={wallet.address} onSend={send} />
                 ) : (
                   <>
                   {messages
@@ -852,7 +892,7 @@ ${isSimulated ? `> [!NOTE]\n> **Simulated Profile Loaded**: No direct perpetuals
                   LIVE • {now}
                 </div>
                 <span className="text-[10px] truncate text-right" style={{ color: C.textMuted }}>
-                  SoSoValue · SoDEX Testnet
+                  SoSoValue · SoDEX Mainnet analytics
                 </span>
               </div>
             </div>
@@ -940,7 +980,7 @@ function TopBar({
             <span className="relative inline-flex rounded-full w-2 h-2" style={{ background: C.success }} />
           </span>
           <span className="text-xs font-medium" style={{ color: C.success }}>LIVE</span>
-          <span className="hidden sm:inline text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ml-1" style={{ background: `${C.accent}15`, color: C.accent, border: `1px solid ${C.accent}40` }}>Testnet</span>
+          <span className="hidden sm:inline text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ml-1" style={{ background: `${C.success}15`, color: C.success, border: `1px solid ${C.success}40` }}>Mainnet</span>
         </div>
 
         {/* SoDEX side-panel toggle */}
@@ -1792,7 +1832,7 @@ function MessageBubble({ message, onRetry, busy, walletAddress }: { message: Cha
           // Build reasoning from decision if present, else derive from narrative themes
           const reasoning: string[] = d?.reasoning?.length
             ? d.reasoning
-            : (n.themes ?? []).slice(0, 4).map((t: string) => t);
+            : n.keyDrivers.slice(0, 4);
 
           return (
             <FlowPulseStrategyCard

@@ -21,33 +21,71 @@ Users ask market questions in plain English, and the app turns SoSoValue data in
 - Strategy outputs
 
 The core flow is:
-```
+
+```text
 Question -> Live Data -> AI Decision -> Visual Output
 ```
 
-FlowPulse Strategy - Turns DefiScope into an AI strategy desk that generates market regimes, ranked opportunities, BTC/ETH/SOL/USDC allocations, and risk-aware plans.
+FlowPulse Strategy turns DefiScope into an AI strategy desk that generates market regimes, ranked opportunities, BTC/ETH/SOL/USDC allocations, and risk-aware plans.
 
 ---
 
 # The Problem It Solves
 
 Crypto research and portfolio auditing are highly fragmented:
-*   Traders check market tickers on one app, read news on another, track ETF flows on third-party tables, and audit their own trade logs manually.
-*   Most platforms focus purely on *raw data* or *price predictions* instead of explaining **what the data means** or **where the trader is losing money**.
+* Traders check market tickers on one app, read news on another, track ETF flows on third-party tables, and audit their own trade logs manually.
+* Most platforms focus purely on *raw data* or *price predictions* instead of explaining **what the data means** or **where the trader is losing money**.
 
-DefiScope AI consolidates this entire loop. It doesn't just show data; it **diagnoses portfolio risk** and **forensically identifies execution leaks** in one click.
+DefiScope AI consolidates this loop. It does not just show data; it explains market context, diagnoses portfolio risk, and identifies evidence-supported execution patterns.
 
 ---
 
 # Challenges We Ran Into & Solutions
 
-### 1. Public Wallet History Retrieval (Without API Keys)
-*   **The Problem**: We wanted users to paste any wallet address to autopsy their historical performance, but querying private exchange databases or requiring users to sign in with API keys breaks the seamless web experience.
-*   **The Solution**: By auditing the public REST gateways of SoDEX, we discovered that account position history endpoints (`/perps/accounts/{userAddress}/positions/history`) are fully public and require no auth headers. We implemented a parallel fetcher that pulls from **SoDEX Mainnet**, **SoDEX Testnet**, **Basescan**, and **Etherscan** APIs to compile a real-time ledger on the fly.
+### 1. Reliable public wallet-history retrieval
 
-### 2. Multi-Asset ERC20 On-Chain Balance Fetching
-*   **The Problem**: Wallet balances in React apps are often mocked or restricted to native gas assets. We needed to load the user's real holdings (USDC, BTC, ETH, SOL) to populate the Risk Engine and Rebalancer.
-*   **The Solution**: We integrated direct JSON-RPC queries using `window.ethereum` (MetaMask/Rabby). The app dynamically queries the connected chain ID, maps token contracts for both **Base Mainnet** and **Ethereum Mainnet**, and executes standard `eth_call` queries for `balanceOf(address)` to fetch multi-token balances on-chain.
+* **The Problem**: A wallet may trade spot, perpetuals, or both; a perps-only history query wrongly reports a spot trader as having no history.
+* **The Solution**: The mainnet collector now reads SoDEX public perps and spot account endpoints, including balances, positions, executions, funding, order history, and closed positions. It normalizes the returned records into a traceable client-side ledger.
+
+### 2. Accurate performance reporting with incomplete history
+
+* **The Problem**: A spot execution alone does not provide a safe realized PnL. Exchange APIs can also return a partial execution window.
+* **The Solution**: Spot PnL is calculated only for FIFO-matched buy/sell lots. Unmatched inventory remains unscored, and a 50-execution spot response is marked potentially partial instead of being claimed as lifetime-complete.
+
+### 3. Wallet-switch state safety
+
+* **The Problem**: Risk values from a previously loaded wallet must never be presented for a newly requested address.
+* **The Solution**: Loading a new account clears the preceding risk state before calculations begin. Unsupported or stablecoin-only exposure shows an explicit coverage limitation rather than default BTC/ETH/SOL metrics.
+
+---
+
+## Mainnet Account Analytics Update
+
+The SoDEX workspace now uses public **SoDEX Mainnet** account APIs only. It is read-only: it never requests signing, creates orders, or falls back to testnet, explorers, wallet-hash-seeded profiles, or fabricated PnL.
+
+### Wallet analysis
+
+- Paste a wallet in the profile panel or ask: `Analyse this wallet - 0x...`.
+- A wallet supplied in chat overrides the connected wallet for that analysis and synchronizes the Risk Engine and Autopsy panel.
+- Perpetuals: balances, positions, closed-position history, executions, and funding records.
+- Spot: balances, order-history records, and executions.
+- Account responses are normalized into a source-traceable ledger for the UI and AI summary.
+
+### Performance safeguards
+
+- Perpetual PnL uses SoDEX-reported realized PnL.
+- Spot realized PnL uses FIFO only when a returned sale can be matched to an earlier returned buy.
+- Unmatched spot inventory is shown as activity, not assigned an invented cost basis or PnL.
+- The Data Integrity panel reports record counts, source errors, and partial-history warnings.
+- “30D” metrics are restricted to the trailing 30-day window.
+- Profit factor is displayed as **Not measurable** when there are no realized losses.
+- A loss pattern is shown only when its observed expectancy is negative.
+- Edge scoring requires at least 30 verified realized lots and includes a sample-size adjustment.
+- Risk state is cleared when changing wallets, preventing prior-wallet calculations from appearing for a newly requested address.
+
+### Known coverage limits
+
+Public SoDEX history can be paginated or retention-limited. A 50-execution spot response is marked potentially partial; DefiScope does not claim lifetime-complete analytics unless source coverage supports it. Unsupported or stablecoin-only holdings do not receive made-up market-risk or correlation data.
 
 ---
 
@@ -58,10 +96,8 @@ DefiScope AI consolidates this entire loop. It doesn't just show data; it **diag
 | Frontend | React + TypeScript + Vite |
 | Styling | Vanilla CSS + Tailwind CSS + shadcn/ui + Framer Motion |
 | Backend | Supabase + Edge Functions |
-| Data | SoSoValue API |
+| Data | SoSoValue API + SoDEX Mainnet REST APIs |
 | AI | AI decision / tool-calling workflow |
-| On-chain | JSON-RPC (`eth_call`, `eth_getBalance`), Basescan, Etherscan |
-| DEX Gateways | SoDEX Mainnet & Testnet REST APIs |
 | Deployment | Vercel |
 
 ---
@@ -71,62 +107,68 @@ DefiScope AI consolidates this entire loop. It doesn't just show data; it **diag
 DefiScope uses a two-step AI flow.
 
 ### Step 1 - Tool Selection
-The AI decides which tools to call based on the user's question:
-- Market narrative
-- ETF flows
-- Opportunity discovery
-- News sentiment
-- AI decision signal
-- Live chart
+
+The AI decides which live-data tools to call based on the user's question: market narrative, ETF flows, opportunity discovery, news sentiment, AI decision signal, and charts.
 
 ### Step 2 - Synthesis & Rendering
-Those tools fetch live data through a Supabase Edge Function that keeps API keys server-side. The AI then writes a clear answer and the UI renders rich panels inline.
+
+Those tools fetch live data through Supabase Edge Functions that keep provider keys server-side. The AI writes a clear answer and the UI renders the supporting panels inline.
 
 For Agent mode, FlowPulse turns that data into:
-```
+
+```text
 Strategy Memo -> Allocation -> Risk Notes -> Optional Action
 ```
 
 ---
 
-# What We Learned
-
-*   **Actionable Forensics > Generic Signals**: A generic *"Should I buy BTC"* bot is not enough. The true value lies in helping traders understand *where their edge breaks*. Pinpointing a specific performance leak (e.g., trading SOL during bearish regimes at night) saves more capital than typical buy/sell alerts.
-*   **Reliability & Fallbacks**: API shapes change and on-chain accounts can be fresh and empty. Building clean, structured fallbacks (e.g., seeding a deterministic mock ledger from the wallet's hash when a fresh wallet connects) ensures the product is always interactive and functional.
-
----
-
 # Completed Development Milestones
 
-## Wave 2 - SoDEX Panel & Interactive Workspace (Completed!)
+## Wave 2 - SoDEX Panel & Interactive Workspace
 
-Instead of using blocked third-party iframes, Wave 2 integrates a premium SoDEX Launch Panel & Chart Workspace in the split-screen dashboard:
-- [x] Interactive Asset Selector: Toggle dynamically between BTC, ETH, and SOL in the side panel.
-- [x] TradingView Real-time Chart: Displays live candlestick spot chart widgets for the chosen asset.
-- [x] AI Market Signals: Displays Momentum, Institutional, and Sentiment indicators.
-- [x] AI Verification Status:
-  - `✓ AI Verified`: Shows in green when signals are derived from the latest AI decision run (inputs: live prices, ETF flows, and news sentiment).
-  - `⚠ Live Price Baseline`: Shows when loading other assets, guiding the user to run a specific briefing in the chat to get AI-verified signals.
-- [x] Visual Trade Setup Diagram: Visualizes Entry, Target (with percentage gains), and Stop Loss (with percentage losses) calculated dynamically from real-time sosoValue coin prices.
-- [x] Action CTAs: Safe deep-linking to SoDEX Testnet and copy order details utility.
-- [x] Animated Allocation Pie Chart: Auto-drawing donut chart using Recharts for FlowPulse allocations.
+- [x] Interactive asset selection, charts, AI signals, trade setup display, safe SoDEX deep-linking, and allocation visuals.
+
+## Wave 3 - Risk Engine & Performance Autopsy
+
+Wave 3 is the live, read-only SoDEX Mainnet **Risk Engine** and **Performance Autopsy** workspace shown in the application.
+
+### Risk Engine
+
+- [x] **Mainnet portfolio loading**: Reads reported SoDEX balances, open perpetual positions, and account state; nested API balance records are normalized before portfolio allocation is calculated.
+- [x] **90-day market-risk analytics**: Historical VaR/CVaR, maximum drawdown, ulcer index, Sharpe, Sortino, Calmar, Omega, daily win rate, annualized return, and annualized volatility.
+- [x] **Portfolio risk score**: Concentration, volatility, drawdown, correlation, and tail-risk sub-scores combine into a 0–100 portfolio-risk score and grade.
+- [x] **Correlation and contribution analysis**: Correlation matrix, average correlation/contagion warning, concentration metrics, and per-asset risk contributions when supported market data is available.
+- [x] **Stress testing**: Mainnet-candle scenario simulator for market-wide or selected-asset shocks; uses actual reported allocation weights, not a seeded portfolio.
+- [x] **State isolation**: Clears prior wallet risk state before a new wallet is calculated, preventing stale BTC/ETH/SOL risk results from appearing for another account.
+- [x] **Honest unsupported-data handling**: Stablecoin-only or unsupported-instrument accounts display a coverage limitation instead of fabricated correlations, volatility, or risk metrics.
+
+### Performance Autopsy
+
+- [x] **Mainnet-only account collector**: Reads SoDEX perpetual balances, positions, closed-position history, executions, and funding records, plus spot balances, order history, and executions.
+- [x] **Chat wallet targeting**: `Analyse this wallet - 0x...` extracts that address, analyzes it directly, and synchronizes the left-side Risk Engine/Autopsy profile to the same wallet.
+- [x] **Verified trade coverage**: Shows closed perpetual positions, spot executions, and FIFO-matched spot disposal lots in the profile and AI response.
+- [x] **Realized-PnL rules**: Perpetual PnL uses SoDEX-reported values. Spot PnL is calculated only when a sale matches earlier returned buy lots using FIFO; unmatched inventory is not assigned fake cost basis or PnL.
+- [x] **Evidence-based scorecard**: Verified 30-day PnL and volume, win rate, expectancy, profit factor, fee coverage, observed patterns, equity curve, and counterfactual analysis.
+- [x] **Statistical safeguards**: Edge scoring requires at least 30 verified realized lots and applies a sample-size adjustment; profit factor is labelled “Not measurable” when there are no realized losses.
+- [x] **Leak-detection safeguards**: A “largest repeatable loss pattern” is shown only for a genuinely negative observed pattern; profitable patterns are never labelled as leaks.
+- [x] **Data integrity panel**: Reports perps closures/executions, spot executions, matched spot lots, order records, source errors, and complete/partial/unavailable coverage.
+- [x] **Partial-history protection**: A spot response at the 50-execution boundary is flagged as potentially partial, so the app does not claim lifetime-complete results without source coverage.
+
+### Mainnet data guarantees
+
+- [x] No testnet source in the live analysis path.
+- [x] No wallet-hash-seeded profile, benchmark, or synthetic PnL in live mode.
+- [x] No explorer substitution for SoDEX trade history.
+- [x] Read-only account analysis: no signing, order placement, or execution path.
+- [x] `sodex-mainnet-account` Edge Function provides a browser-safe, read-only gateway for SoDEX Mainnet account requests.
 
 ---
 
-## Wave 3 - Institutional Risk Engine & Autopsy (Completed Final Wave!)
+# What We Learned
 
-Wave 3 introduces an institutional-grade Risk Engine and Performance Autopsy workstation:
-- [x] **16 Quantitative Risk Metrics**: Sharpe, Sortino, Calmar, Omega, historical VaR/CVaR, and max drawdowns.
-- [x] **Correlation Heatmap**: 3x3 pairwise correlation matrix with Contagion warning thresholds.
-- [x] **Scenario Stress-Testing**: Shock holdings by up to -50% to evaluate tail-risk impact.
-- [x] **Direct SoDEX REST API Integrations**: Pull positions history directly from mainnet and testnet.
-- [x] **On-Chain Balance Retrieval**: Standard JSON-RPC ERC20 queries for multi-token balances on Base/Ethereum.
-- [x] **Explorer Crawlers**: Fallback to Etherscan/Basescan APIs for transaction history.
-
----
-
-## Product Vision
-> DefiScope stands as a fully operational **AI market intelligence and strategy desk** that researches markets, explains decisions, performs diagnostic trade autopsies, and connects those strategies to simulated execution rails.
+* **Actionable forensics require evidence boundaries**: a convincing-looking metric is not useful if the source history or cost basis is incomplete.
+* **Real-data UX must expose coverage**: source endpoints, record counts, partial-history warnings, and withheld calculations are as important as the final score.
+* **Reliability is better than a synthetic fallback**: when records are absent or unsupported, DefiScope reports that state rather than generating a fake profile.
 
 ---
 
@@ -144,9 +186,12 @@ Wave 3 introduces an institutional-grade Risk Engine and Performance Autopsy wor
 
 | Function | Purpose |
 |---|---|
-| sosovalue | SoSoValue proxy + cache + Binance price enrichment |
+| sosovalue | SoSoValue proxy + cache + price enrichment |
 | ai-chat | Two-phase tool-calling AI (plan -> synthesize) |
 | ai-decision | Structured BUY/HOLD/SELL signal generation |
+| sodex-mainnet-account | Read-only SoDEX Mainnet perps and spot account gateway |
+
+`sodex-mainnet-account` has no signing or execution path. Keep provider keys such as `SOSO_API_KEY` in Edge Function secrets; do not put them in `VITE_*` variables or commit them.
 
 ## Local Development
 
@@ -155,7 +200,6 @@ npm install
 npm run dev
 ```
 
-`.env.local`:
 ```env
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
@@ -164,12 +208,16 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ## Example Queries
 
 - *"Should I buy BTC right now?"*
-- *"Run a full market briefing"* -> triggers FlowPulse Strategy Card
+- *"Run a full market briefing"*
 - *"ETF flow analysis for BTC"*
-- *"Top opportunities today"*
-- *"Live ETH chart"*
+- *"Analyse this wallet - 0x7079002471f8004cd34e8aeaa65dfc2b2e12430b"*
+- *"What are the biggest leaks in my trading performance?"*
 
 ---
+
+## Product Vision
+
+> DefiScope is an AI market-intelligence and strategy desk that researches markets, explains decisions, and performs source-backed, read-only trade-performance analysis.
 
 ## License
 
