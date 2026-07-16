@@ -462,9 +462,9 @@ export default function SodexLaunchPanel({
 
   // ─── Render ─────────────────────────────────────────────────────────────
   return (
-    <div className="h-full flex flex-col overflow-y-auto custom-scrollbar" style={{ background: C.bg, color: C.textPrimary }}>
+    <div className="h-full min-h-0 flex flex-col overflow-y-auto overflow-x-hidden overscroll-contain custom-scrollbar" style={{ background: C.bg, color: C.textPrimary }}>
       {/* Tabs */}
-      <div className="flex border-b sticky top-0 z-15" style={{ background: C.panel, borderColor: C.border }}>
+      <div className="sticky top-0 z-20 shrink-0 flex border-b" style={{ background: C.panel, borderColor: C.border }}>
         {([
           { id: "risk", label: "Risk Engine", icon: Gauge },
           { id: "autopsy", label: "Autopsy", icon: Award },
@@ -487,11 +487,11 @@ export default function SodexLaunchPanel({
       </div>
 
       {/* Wallet Target Control Panel */}
-      <div className="px-5 pt-4 pb-2 border-b space-y-3" style={{ background: C.panel, borderColor: C.border }}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+      <div className="sticky top-[52px] z-10 shrink-0 px-5 pt-4 pb-2 border-b space-y-3 overflow-hidden" style={{ background: C.panel, borderColor: C.border }}>
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
             <UserCheck size={14} style={{ color: C.accent }} />
-            <span className="text-xs font-bold text-white">SoDEX Mainnet Profile</span>
+            <span className="truncate text-xs font-bold text-white">SoDEX Mainnet Profile</span>
           </div>
           <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: C.surface }}>
             <button onClick={() => switchDataMode("live")} className="px-2 py-1 rounded text-[10px] font-bold" style={{ background: dataMode === "live" ? `${C.success}20` : "transparent", color: dataMode === "live" ? C.success : C.textMuted }}>LIVE</button>
@@ -499,14 +499,14 @@ export default function SodexLaunchPanel({
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex min-w-0 gap-2">
           <input
             type="text"
             placeholder="Paste the SoDEX mainnet wallet address (0x...)"
             value={walletInput}
             disabled={dataMode === "demo"}
             onChange={(e) => setWalletInput(e.target.value)}
-            className="flex-1 px-3 py-1.5 rounded-xl border text-xs font-mono focus:outline-none transition-all disabled:opacity-50 text-white"
+            className="min-w-0 flex-1 px-3 py-1.5 rounded-xl border text-xs font-mono focus:outline-none transition-all disabled:opacity-50 text-white"
             style={{ background: C.surface, borderColor: C.border }}
           />
           <button

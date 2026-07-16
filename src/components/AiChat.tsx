@@ -65,6 +65,7 @@ interface ChatMessage {
   retryText?: string;
   tradeResult?: SodexTradeResult;
   agentRecs?: AgentRecommendationData;
+  followUpPrompts?: string[];
 }
 
 type ChatMode = "chat" | "agent";
@@ -357,9 +358,11 @@ ${isSimulated ? `> [!NOTE]\n> **Simulated Profile Loaded**: No direct perpetuals
         
         const perpsClosed = tradesList.filter((trade) => trade.market === "perps").length;
         const spotLots = tradesList.filter((trade) => trade.market === "spot").length;
+        const perpsPnl = tradesList.filter((trade) => trade.market === "perps").reduce((sum, trade) => sum + trade.pnl, 0);
+        const spotPnl = tradesList.filter((trade) => trade.market === "spot").reduce((sum, trade) => sum + trade.pnl, 0);
         const patterns = findPerformancePatterns(tradesList);
-        const biggestLeak = patterns[0];
-        const bestEdge = patterns.length > 0 ? [...patterns].sort((a, b) => b.expectancy - a.expectancy)[0] : undefined;
+        const biggestLeak = patterns.find((pattern) => pattern.expectancy < 0);
+        const bestEdge = [...patterns].sort((a, b) => b.expectancy - a.expectancy).find((pattern) => pattern.expectancy > 0);
         replyContent = `### SoDEX Mainnet Trade Autopsy: **${shortAddr}**
 
 Verified sources: **SoDEX mainnet perps and spot execution history**. I found **${perpsClosed}** closed perpetual positions, **${snapshot.spotTrades.length}** spot executions, and **${spotLots}** FIFO-matched spot disposal lots.
@@ -372,10 +375,68 @@ ${bestEdge ? `- **Strongest observed pattern:** **${bestEdge.label}**, **+$${bes
 
 Spot PnL is reported only where a sale can be matched to earlier returned purchase executions using FIFO; unmatched lots are excluded rather than estimated. The Risk Engine uses only the loaded SoDEX mainnet account and SoDEX mainnet market candles. It does not use testnet, seeded wallets, explorers, or synthetic PnL.`;
 
+        const topic = lowerText;
+        if (topic.includes("largest verified loss pattern") || topic.includes("loss pattern")) {
+          replyContent = biggestLeak ? `### Why is ${biggestLeak.label} the largest verified loss pattern?
+
+This label is based on **${biggestLeak.trades}** comparable realized lots, not a forecast.
+
+- **Average realized PnL:** **$${biggestLeak.expectancy.toFixed(2)} per lot**.
+- **Total realized PnL:** **$${biggestLeak.netPnl.toFixed(2)}**.
+- **Win rate within this setup:** **${biggestLeak.winRate.toFixed(1)}%**.
+
+It is the largest verified loss pattern because its average realized outcome is the lowest among repeated comparable groups. The data does not establish a cause such as entry timing or sizing; it identifies the setup for further review.` : "### What evidence is missing before calling a setup a loss pattern?\n\nNo repeated group has a negative expectancy with at least two comparable realized lots, so the wallet does not yet support a verified loss-pattern claim.";
+        } else if (topic.includes("win rate") || topic.includes("prove an edge")) {
+          replyContent = `### Why does the ${winRate.toFixed(1)}% win rate not prove an edge by itself?
+
+Win rate counts winning lots, but it does not measure the size of wins versus losses. For **${shortAddr}**, the verified profit factor is **${grossLosses > 0 ? profitFactor.toFixed(2) : "not measurable"}** and net realized PnL is **${netPnlVal >= 0 ? "+" : ""}$${netPnlVal.toLocaleString()}**.
+
+A strategy can win often and still lose money if its losing lots are much larger. The score therefore evaluates realized PnL, profit factor, and sample size alongside win rate.`;
+        } else if (topic.includes("spot versus") || topic.includes("spot vs") || topic.includes("perpetuals versus")) {
+          replyContent = `### What is the spot-versus-perpetuals PnL split?
+
+- **Perpetuals:** ${perpsClosed} closed positions; **${perpsPnl >= 0 ? "+" : ""}$${perpsPnl.toLocaleString()}** SoDEX-reported realized PnL.
+- **Spot:** ${snapshot.spotTrades.length} executions produced ${spotLots} FIFO-matchable disposal lots; **${spotPnl >= 0 ? "+" : ""}$${spotPnl.toLocaleString()}** realized PnL.
+
+Only matchable spot buy/sell pairs are included. Any remaining open or unmatched spot inventory is excluded rather than estimated.`;
+        } else if (topic.includes("complete") || topic.includes("missing") || topic.includes("coverage")) {
+          replyContent = `### What data coverage supports this analysis?
+
+SoDEX returned **${perpsClosed}** closed perps positions, **${snapshot.trades.length}** perps executions, **${snapshot.spotTrades.length}** spot executions, and **${spotLots}** FIFO-matched spot disposal lots.
+
+${snapshot.spotTrades.length >= 50 ? "The returned spot history is at the 50-execution boundary, so it is marked potentially partial; this analysis does not claim lifetime completeness." : "The returned spot execution count is below the observed 50-execution boundary."}
+
+${snapshot.errors.length ? `Source warnings: ${snapshot.errors.length} endpoint request(s) failed or were unavailable.` : "All configured account-source requests returned for this refresh."}`;
+        } else if (topic.includes("what drove") || topic.includes("why did") || topic.includes("why is")) {
+          replyContent = `### What drove this wallet's realized result?
+
+For **${shortAddr}**, verified realized PnL is **${netPnlVal >= 0 ? "+" : ""}$${netPnlVal.toLocaleString()}** across **${tradesList.length}** verified realized lots.
+
+- **Perpetual closures:** ${perpsClosed} records, **${perpsPnl >= 0 ? "+" : ""}$${perpsPnl.toLocaleString()}** realized PnL.
+- **FIFO-matched spot disposals:** ${spotLots} lots from ${snapshot.spotTrades.length} returned spot executions, **${spotPnl >= 0 ? "+" : ""}$${spotPnl.toLocaleString()}** realized PnL.
+- **Observed win rate:** ${winRate.toFixed(1)}%. This describes the returned realized lots; it is not a guarantee of future performance.
+
+${bestEdge ? `The strongest repeated observed setup is **${bestEdge.label}** at **+$${bestEdge.expectancy.toFixed(2)} per lot** across ${bestEdge.trades} lots.` : "No repeated positive setup meets the comparison threshold yet."}`;
+        }
+
+        const initialPrompts = [
+          `What drove the ${netPnlVal >= 0 ? "+" : ""}$${netPnlVal.toFixed(0)} realized PnL for wallet ${targetAddress}?`,
+          `Why is the ${winRate.toFixed(0)}% win rate not enough by itself to prove an edge for wallet ${targetAddress}?`,
+          `What is the spot versus perpetuals realized PnL split for wallet ${targetAddress}?`,
+          biggestLeak ? `Why is ${biggestLeak.label} the largest verified loss pattern for wallet ${targetAddress}?` : `What evidence is missing before calling any setup a loss pattern for wallet ${targetAddress}?`,
+          `What data is missing or potentially incomplete for wallet ${targetAddress}?`,
+        ];
+        const followUpPrompts = topic.includes("what drove") || topic.includes("why")
+          ? [
+              `What is the spot versus perpetuals realized PnL split for wallet ${targetAddress}?`,
+              biggestLeak ? `What decision rule should be reviewed for ${biggestLeak.label} in wallet ${targetAddress}?` : `What evidence is missing before calling any setup a loss pattern for wallet ${targetAddress}?`,
+              `What data is missing or potentially incomplete for wallet ${targetAddress}?`,
+            ]
+          : initialPrompts;
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
-              ? { ...m, content: replyContent, animate: true }
+              ? { ...m, content: replyContent, animate: true, followUpPrompts }
               : m
           )
         );
@@ -799,7 +860,7 @@ Spot PnL is reported only where a sale can be matched to earlier returned purcha
                   {messages
                     .filter((m) => !(m.role === "assistant" && m.content === "" && (!m.steps || m.steps.length === 0)))
                     .map((m) => (
-                      <MessageBubble key={m.id} message={m} onRetry={handleRetry} busy={busy} walletAddress={wallet.address} />
+                      <MessageBubble key={m.id} message={m} onRetry={handleRetry} onFollowUp={send} busy={busy} walletAddress={wallet.address} />
                     ))}
                   {showTyping && <TypingIndicator />}
                   </>
@@ -1746,7 +1807,7 @@ function TicketSelect({
 
 
 
-function MessageBubble({ message, onRetry, busy, walletAddress }: { message: ChatMessage; onRetry: (text: string) => void; busy: boolean; walletAddress?: string }) {
+function MessageBubble({ message, onRetry, onFollowUp, busy, walletAddress }: { message: ChatMessage; onRetry: (text: string) => void; onFollowUp: (text: string) => void; busy: boolean; walletAddress?: string }) {
   const isUser = message.role === "user";
   const time = formatTime(message.ts);
   const providerUnavailable = !isUser && isProviderUnavailableText(message.content);
@@ -1873,6 +1934,20 @@ function MessageBubble({ message, onRetry, busy, walletAddress }: { message: Cha
           ) : (
             <Typewriter text={message.content} instant={!message.animate} />
           )
+        )}
+        {!isUser && message.followUpPrompts && message.followUpPrompts.length > 0 && (
+          <div className="pt-1 space-y-2">
+            <p className="text-[11px] font-semibold" style={{ color: C.textMuted }}>Explore this wallet</p>
+            <div className="flex flex-wrap gap-2">
+              {message.followUpPrompts.map((prompt) => (
+                <button key={prompt} onClick={() => onFollowUp(prompt)} disabled={busy}
+                  className="rounded-full px-3 py-1.5 text-[11px] text-left transition-all disabled:opacity-50"
+                  style={{ background: C.surface, border: `1px solid ${C.border}`, color: C.accent }}>
+                  {prompt.replace(/ for wallet 0x[a-fA-F0-9]{40}\??$/, "")}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>
